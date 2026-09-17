@@ -45,6 +45,12 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ledger} — write the document ledger from topic headers. */
+    LEDGER("ledger", LedgerMojo.class,
+            "Read the :topic-*: header of every AsciiDoc file under the "
+                    + "module's source root and write target/doc-ledger.yaml: "
+                    + "the storage structure and header metadata of the corpus, "
+                    + "shaped like topic-registry.yaml."),
     /** {@code idoc:lint-site} — lint src/site/site.xml for IKE theme/breadcrumb drift (#319). */
     LINT_SITE("lint-site", LintSiteMojo.class,
             "Lint src/site/site.xml for IKE Network theme + "

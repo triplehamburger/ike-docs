@@ -79,6 +79,13 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   inline with insertion/deletion roles. See
   xref:_review_packets_idocdiff[Review packets] below.
 
+| `idoc:ledger`
+| Read the `:topic-*:` header of every AsciiDoc file under the
+  module's source root and write `target/doc-ledger.yaml`: the
+  storage structure and header metadata of the corpus, shaped like
+  `topic-registry.yaml`. See
+  xref:_document_ledger_idocledger[Document ledger] below.
+
 | `idoc:adocstudio`
 | Generate Adoc Studio sidecar projects for assembly modules.
 
@@ -169,6 +176,34 @@ Stamp Register.
 
 Design note: `dev-doc-diff-pipeline` in `ike-lab-documents/topics/`;
 epic link:https://github.com/IKE-Network/ike-issues/issues/648[ike-issues#648].
+
+[[_document_ledger_idocledger]]
+== Document ledger (`idoc:ledger`)
+
+A topic library's `topic-registry.yaml` is authored; the ledger is
+derived. `idoc:ledger` reads the `:topic-*:` attribute block, the
+anchor and the level-1 heading of every `.adoc` file under the
+module's `src/docs/asciidoc` -- plain line parsing, no AsciidoctorJ --
+and writes `target/doc-ledger.yaml`: one entry per topic (`id`,
+`file`, `title`, `type`, `status`, `provenance`, `keywords`,
+`char-count`, `anchor`, `header`) grouped by directory, the files that
+declare no topic id (assemblies and indexes, with their include
+counts), and a findings list. The field names are the registry's, so
+the two can be compared field by field. The same structure is printed
+to the build log as a tree.
+
+[source,bash]
+----
+mvn idoc:ledger                                  # the module's src/docs/asciidoc
+mvn idoc:ledger -Dike.ledger.roots=a,b           # other roots, comma-separated
+mvn idoc:ledger -Dike.ledger.output=/tmp/l.yaml  # write elsewhere
+----
+
+Header findings -- a missing required attribute, an anchor that does
+not match the id, an unknown type or status, the same id in two files
+-- are reported in the ledger and the log and do not fail the build.
+A module without `src/docs/asciidoc` is skipped with one line, so the
+goal can run from a reactor root. `-Dike.skip.ledger=true` skips it.
 
 == Design rationale
 
