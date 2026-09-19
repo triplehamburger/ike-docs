@@ -201,6 +201,63 @@ class LedgerTest {
     }
 
     @Test
+    void yaml_roundTripsThroughSnakeYamlUnchanged(@TempDir Path dir) throws IOException {
+        Path root = corpus(dir);
+        Map<String, Object> model = Ledger.model(List.of(Ledger.scan(root, 100)), dir, Instant.parse("2026-09-17T12:00:00Z"));
+        String once = Ledger.yaml(model);
+        Path file = dir.resolve("target/rt.yaml");
+        Files.writeString(file, once);
+        String twice = Ledger.yaml(Ledger.load(file));
+        assertThat(twice).isEqualTo(once);
+        assertThat(once).doesNotContain("\t");
+    }
+
+    @Test
+    void scalar_quotesWhatYamlWouldRetype_andLeavesTheRestPlain(@TempDir Path dir) throws IOException {
+        Map<String, Object> odd = new java.util.LinkedHashMap<>();
+        odd.put("empty", "");
+        odd.put("bool", "yes");
+        odd.put("num", "3");
+        odd.put("float", "1.0");
+        odd.put("date", "2026-09-17");
+        odd.put("stamp", "2026-09-17T12:00:00Z");
+        odd.put("colon", "K031739 i-STAT Test: Device Overview");
+        odd.put("hash", "a # b");
+        odd.put("dash", "- leading dash");
+        odd.put("quote", "it's");
+        odd.put("nl", "two\nlines");
+        odd.put("plain", "Public domain \u2014 US federal government work.");
+        odd.put("count", 42L);
+        odd.put("flag", true);
+        Map<String, Object> model = new java.util.LinkedHashMap<>();
+        model.put("roots", List.of());
+        model.put("odd", odd);
+        Path file = dir.resolve("odd.yaml");
+        Files.writeString(file, Ledger.yaml(model));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> back = (Map<String, Object>) Ledger.load(file).get("odd");
+        Map<String, Object> expected = new java.util.LinkedHashMap<>();
+        expected.put("empty", "");
+        expected.put("bool", "yes");
+        expected.put("num", "3");
+        expected.put("float", "1.0");
+        expected.put("date", "2026-09-17");
+        expected.put("stamp", "2026-09-17T12:00:00Z");
+        expected.put("colon", "K031739 i-STAT Test: Device Overview");
+        expected.put("hash", "a # b");
+        expected.put("dash", "- leading dash");
+        expected.put("quote", "it's");
+        expected.put("nl", "two\nlines");
+        expected.put("plain", "Public domain \u2014 US federal government work.");
+        expected.put("count", 42);
+        expected.put("flag", true);
+        assertThat(back).containsExactlyEntriesOf(expected);
+        assertThat(Ledger.scalar("Public domain \u2014 US federal government work.")).isEqualTo("Public domain \u2014 US federal government work.");
+        assertThat(Ledger.scalar("2026-09-17T12:00:00Z")).isEqualTo("'2026-09-17T12:00:00Z'");
+        assertThat(Ledger.scalar("missing: status")).isEqualTo("'missing: status'");
+    }
+
+    @Test
     void scan_failsPastMaxFiles(@TempDir Path dir) throws IOException {
         Path root = corpus(dir);
         assertThatThrownBy(() -> Ledger.scan(root, 2))
