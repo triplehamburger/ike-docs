@@ -15,7 +15,20 @@ This guide is for people who work through Claude rather than a terminal.
 For the technical reference, see
 the xref:index.adoc[plugin page].
 
-== What it is
+== What is the ledger
+
+Who this is for::
+Anyone who writes, reviews or looks after documents in an IKE project
+and works through Claude rather than a terminal:
+authors, reviewers, regulatory and quality staff, and project leads.
+No knowledge of Maven, Git or AsciiDoc is assumed.
+
+Purpose::
+To give you a trustworthy, current picture of a project's documents
+(what exists, where it is stored and whether each one is labeled correctly)
+in a few seconds,
+so that gaps are caught before a review or a submission
+rather than during one.
 
 The ledger is a fresh list of every document in a project,
 built by reading the label block at the top of each file.
