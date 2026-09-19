@@ -40,11 +40,16 @@ import java.util.List;
  *   mvn idoc:ledger -Dike.ledger.output=/tmp/l.yaml   # write elsewhere
  * </pre>
  *
+ * <p>The default phase is {@code validate}: the goal reads sources and
+ * writes only under {@code target/}, so an execution declared without a
+ * phase (as {@code ike-parent} does for {@code lint-site}) refreshes the
+ * ledger on every build, including a bare {@code mvn validate}.
+ *
  * <p>Skip with {@code -Dike.skip.ledger=true}.
  *
  * @since 109
  */
-@Mojo(name = "ledger")
+@Mojo(name = "ledger", defaultPhase = "validate")
 public class LedgerMojo implements org.apache.maven.api.plugin.Mojo {
 
     @org.apache.maven.api.di.Inject
