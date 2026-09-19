@@ -1,0 +1,434 @@
+= The Document Ledger: A Plain-Language Guide
+:icons: font
+:source-highlighter: coderay
+:toc: left
+:toclevels: 2
+:sectnums:
+
+The document ledger is an automatic inventory of a project's documents.
+One command reads every document file,
+lists what is there,
+and points out labeling problems,
+without changing anything.
+
+This guide is for people who work through Claude rather than a terminal.
+For the technical reference, see
+the xref:index.adoc[plugin page].
+
+== What it is
+
+The ledger is a fresh list of every document in a project,
+built by reading the label block at the top of each file.
+Think of a librarian walking the shelves
+and writing down each book's title, subject and condition,
+instead of trusting the old card catalog.
+
+Use it when you want to know:
+
+* What documents exist in this project, and in which folders?
+* Is every document labeled properly (name, type, status, keywords)?
+* Does the hand-kept catalog (the topic registry) still match what is really on disk?
+
+The technical name is `idoc:ledger`.
+It is a command in the IKE documentation toolkit
+and works on any IKE documentation project, large or small.
+A test on a 290-document project finished in under a tenth of a second.
+
+You do not need to type commands.
+Ask Claude in plain words, as shown under each action below.
+The exact command is listed for reference.
+
+== Tutorial: your first ledger
+
+This walk-through takes about ten minutes.
+You will build a ledger, read it, fix a problem it reports,
+and add a new document to it.
+The file names are made up for illustration;
+yours will differ.
+
+=== Step 1: Build the ledger
+
+First, open the project in Claude.
+"The project" is the folder on your computer that holds the documents.
+Opening it tells Claude which folder to work in.
+
+In the Claude desktop app (Mac or Windows)::
+. Open the Claude app and switch to the *Code* tab.
+. Choose the project folder when Claude asks where to work.
+  Pick the top folder of the project,
+  the one that contains a file named `pom.xml`,
+  not the documents folder inside it.
+. Start a new session.
+  The folder name shown in the session confirms you are in the right place.
+
+In a web browser::
+. Go to https://claude.ai/code and sign in.
+. Pick the project's repository from the list.
+  This needs the project to be on GitHub and your GitHub account to be connected;
+  Claude walks you through connecting it the first time.
+
+If the project is not on your computer yet,
+ask the person who maintains it for the GitHub address,
+then tell Claude in the desktop app:
+"Download the project at <address> and open it."
+
+To check that you are in the right place, ask:
+"Which folder are you working in, and does it have a pom.xml?"
+
+Once the project is open, say:
+
+____
+Run the document ledger for this project.
+____
+
+Claude runs the command and shows you the result.
+Nothing in your project changes.
+
+=== Step 2: Read the list
+
+The result is a folder-by-folder list, followed by one summary line:
+
+----
+src/docs/asciidoc
+  topics/
+    cleaning-steps.adoc         cleaning-steps         procedure  -
+    device-description.adoc     device-description     concept    draft
+  submission.adoc               assembly, 2 includes
+ledger: topics/cleaning-steps.adoc: missing required attribute :topic-status:
+2 topics, 1 other file, 1 finding; ledger written to target/doc-ledger.yaml (41 ms)
+----
+
+Read it like this:
+
+* Each labeled document shows four things:
+  its file name, its name (id), its type and its status.
+* A dash means that label is missing.
+  Here `cleaning-steps.adoc` has no status.
+* `submission.adoc` is a binder:
+  a file that pulls two other documents together.
+* The line starting with `ledger:` is a finding.
+  It names the file and says what is wrong.
+* The last line counts everything and says where the ledger file was saved.
+
+=== Step 3: Fix the finding
+
+The finding says `cleaning-steps.adoc` is missing its status label.
+You can fix it yourself by adding this line to the label block at the top of the file:
+
+[source,asciidoc]
+----
+:topic-status: draft
+----
+
+Or let Claude do it:
+
+____
+Fix what the ledger reported.
+____
+
+The ledger itself never edits a document.
+Any change is made by you or by Claude, where you can review it.
+
+=== Step 4: Run it again
+
+Say:
+
+____
+Run the ledger again.
+____
+
+The ledger is rebuilt from scratch.
+The dash is replaced by `draft`,
+and the summary line now ends in `0 findings`.
+That is the whole routine: run, read, fix, run again.
+
+=== Step 5: Add a new document
+
+Suppose a new document, `storage-conditions.adoc`, has just been added to the `topics` folder.
+You do not have to re-read the whole collection.
+Say:
+
+____
+Add topics/storage-conditions.adoc to the ledger.
+____
+
+The result is short:
+
+----
+ledger: topic storage-conditions at topics/storage-conditions.adoc
+added 1 file to target/doc-ledger.yaml without rescanning (12 ms)
+----
+
+The new document is now in the ledger,
+placed in its folder and checked like every other document.
+
+=== Step 6: Compare with the registry
+
+The ledger uses the same field names as the hand-kept topic registry.
+To find documents the registry has missed, or entries whose document is gone, say:
+
+____
+Compare the ledger with the topic registry and list the differences.
+____
+
+You have now used every part of the ledger you are likely to need.
+The rest of this guide is reference.
+
+== Actions you can take
+
+There are six actions.
+Action 1 is the one you will use almost every time.
+The others adjust it.
+
+[cols="1,4,6",options="header"]
+|===
+| # | Action | Ask Claude
+
+| 1 | Build the ledger | "Run the document ledger for this project."
+| 2 | Add new documents without re-reading everything | "Add the file X to the ledger."
+| 3 | Look in different folders | "Run the ledger on the folders X and Y."
+| 4 | Save the ledger somewhere else | "Run the ledger and save it to Z."
+| 5 | Allow a very large collection | "Run the ledger and raise the file limit to 10,000."
+| 6 | Turn the ledger off | "Skip the ledger for this run."
+|===
+
+=== Action 1: Build the ledger
+
+What it does::
+Reads every document file in the project's standard documents folder
+and produces the inventory.
+
+What you get::
+A folder-by-folder list on screen,
+a saved ledger file,
+and a one-line summary such as "3 topics, 1 other file, 0 findings".
+
+Good to know::
+If the project has no documents folder,
+the ledger says so in one line and moves on.
+That is normal, not an error.
+It lets one request cover a whole group of projects at once.
+
+Exact command::
+`mvn idoc:ledger`
+
+=== Action 2: Add new documents without re-reading everything
+
+What it does::
+Reads only the files you name and merges them into the ledger that already exists.
+List several files separated by commas.
+
+When to use it::
+One or a few documents were just added or changed,
+and the collection is large enough that you do not want to re-read all of it.
+
+Good to know::
+* Adding the same file twice is safe; the newer entry replaces the older one.
+* The new document's name is checked against the ledger,
+  so a duplicate name is still caught.
+* If no ledger exists yet, a full build (Action 1) runs instead.
+* Deleted documents are not noticed this way.
+  After deleting or moving documents, use Action 1.
+* Each file must be a document file inside one of the folders the ledger covers.
+  Otherwise the run stops and says which file to check.
+
+Exact command::
+`mvn idoc:ledger -Dike.ledger.add=src/docs/asciidoc/topics/storage-conditions.adoc`
+
+=== Action 3: Look in different folders
+
+What it does::
+Points the ledger at one or more folders you name,
+instead of the standard documents folder.
+List several folders separated by commas.
+
+When to use it::
+Your documents live somewhere unusual,
+or you only care about one part of the collection.
+
+Good to know::
+If a folder you name does not exist,
+the run stops and tells you which folder to check.
+This protects you from a typo silently producing an empty inventory.
+
+Exact command::
+`mvn idoc:ledger -Dike.ledger.roots=folderA,folderB`
+
+=== Action 4: Save the ledger somewhere else
+
+What it does::
+Writes the ledger file to a location you choose.
+Normally it goes into the project's temporary build folder as `target/doc-ledger.yaml`.
+
+When to use it::
+You want to keep a copy to share,
+or to compare two runs side by side.
+
+Exact command::
+`mvn idoc:ledger -Dike.ledger.output=/path/to/ledger.yaml`
+
+=== Action 5: Allow a very large collection
+
+What it does::
+Raises the safety limit on how many document files one folder may hold.
+The limit is 5,000 files.
+
+When to use it::
+Only when a run stops with the message "More than 5000 .adoc files".
+The limit exists to catch the ledger being pointed at the wrong, enormous folder by mistake.
+
+Exact command::
+`mvn idoc:ledger -Dike.ledger.maxFiles=10000`
+
+=== Action 6: Turn the ledger off
+
+What it does::
+Skips the ledger for one run.
+Nothing is read and nothing is written.
+
+When to use it::
+The ledger is part of a larger automated job
+and you do not need it this time.
+
+Exact command::
+`mvn idoc:ledger -Dike.skip.ledger=true`
+
+Actions 3, 4 and 5 can be combined in a single request.
+
+== What you get back
+
+Every full run gives you three things:
+a list on screen, a saved file, and a summary line.
+
+The on-screen list::
+Folders, then each file inside.
+A labeled document shows its name, type and status.
+Any other file shows whether it is a binder that pulls other documents together,
+or a plain file.
+Step 2 of the tutorial shows an example.
+
+The ledger file::
+A saved, structured copy of the same inventory with more detail.
+It uses the same field names as the hand-kept topic registry,
+so the two can be compared line by line.
+
+The summary line::
+Counts of labeled documents, other files and problems found,
+plus where the file was saved and how long the run took.
+
+[cols="1,1",options="header"]
+|===
+| For each labeled document | For every other file
+
+| Name (id), file location and title | File location and title
+| Type, status and origin | Kind: binder (assembly) or plain
+| Keywords, summary and related documents | How many documents it pulls in
+| Length in characters | Its document settings
+| Whether the label block is complete, or what is missing |
+|===
+
+The ledger file is rebuilt from scratch on every full run.
+Do not edit it and do not store it with the project's documents.
+If you want to keep one, use Action 4.
+
+== Problems it points out
+
+The ledger reports labeling problems, called findings,
+but never stops the run because of them.
+Each finding names the file it concerns.
+Findings appear as warnings on screen
+and in a list at the end of the ledger file.
+
+[cols="3,5,4",options="header"]
+|===
+| The message says | What it means | How to fix it
+
+| missing required attribute
+| The label block lacks one of the four required labels: name (id), type, status or keywords.
+| Add the missing label at the top of the file.
+
+| unknown type
+| The type is not one of: concept, task, procedure, reference, dialog.
+| Change it to one of the five.
+
+| unknown status
+| The status is not one of: draft, proposed, review, published, deprecated.
+| Change it to one of the five.
+
+| no anchor before the heading
+| The bookmark that lets other documents link to this one is missing.
+| Add the bookmark line, matching the document's name.
+
+| anchor does not match
+| The bookmark and the document's name differ, so links may break.
+| Make the two identical.
+
+| no level-1 heading
+| The document has no main title.
+| Add a title line.
+
+| duplicate id
+| Two files claim the same name. The message names both.
+| Rename one of them.
+
+| resolves outside the root, skipped
+| The file is a shortcut pointing outside the folder. It was not read.
+| Usually none needed. Replace the shortcut with a real file if it belongs here.
+|===
+
+Only labeled documents are checked.
+Binders and plain files are listed but never produce findings.
+
+== What it never does
+
+The ledger only reads your documents and writes one file of its own.
+It is safe to run at any time, as often as you like.
+
+* It never edits, moves, renames or deletes a document.
+* It never changes the hand-kept topic registry.
+  The registry stays the official record;
+  the ledger is a disposable cross-check.
+* It never fails a run because of a labeling problem.
+  Problems are reported, not enforced.
+* It never reads outside the folders it was given.
+  Shortcuts that point elsewhere are skipped and reported.
+* It ignores working folders that hold no real documents
+  (`target`, `.git`, `node_modules`).
+
+A run stops early in only a few cases:
+a folder or file you named does not exist or is outside the ledger's folders (Actions 2 and 3),
+the file limit is exceeded (Action 5),
+or a file or folder cannot be read or written.
+Each message says what to check.
+
+== Words used in this guide
+
+[cols="2,6",options="header"]
+|===
+| Word | Meaning
+
+| Document file
+| A text file ending in `.adoc`, the format IKE documents are written in (AsciiDoc).
+
+| Label block
+| The lines at the top of a document that state its name, type, status, keywords and other details.
+  Technically, the `:topic-*:` header.
+
+| Labeled document (topic)
+| A document that has a label block with a name.
+
+| Binder (assembly)
+| A file that pulls other documents together into one larger document.
+
+| Plain file
+| A document file with no label block that pulls nothing in.
+
+| Topic registry
+| The hand-kept official catalog of documents, `topic-registry.yaml`.
+
+| Ledger
+| The automatically built inventory, `doc-ledger.yaml`.
+
+| Finding
+| A labeling problem the ledger noticed.
+|===

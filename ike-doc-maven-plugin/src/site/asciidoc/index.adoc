@@ -28,6 +28,10 @@ in `ike-tooling`. The three plugins are deliberately separate —
 `idoc:*` is doc rendering, `ike:*` is single-repo release, `ws:*`
 fans out across a workspace's checked-out subprojects.
 
+For people who work through Claude rather than a terminal,
+xref:ledger-guide.adoc[The Document Ledger: A Plain-Language Guide]
+walks through `idoc:ledger` with a tutorial and every action it offers.
+
 == Plugin shape
 
 This is a *regular Maven plugin* — no `<extensions>true</extensions>`,
