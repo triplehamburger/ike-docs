@@ -69,6 +69,10 @@ public final class Ledger {
     public static Scan scan(Path root, int maxFiles) throws IOException {
         Path real = root.toRealPath();
         List<Path> files = new ArrayList<>();
+        List<String> linkFindings = new ArrayList<>();
+        // Links are never followed, so containment holds without resolving each
+        // file's real path (which cost as much as parsing); a linked .adoc is
+        // reported and skipped instead.
         Files.walkFileTree(real, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
@@ -80,7 +84,13 @@ public final class Ledger {
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                if (file.getFileName().toString().endsWith(".adoc")) {
+                if (!file.getFileName().toString().endsWith(".adoc")) {
+                    return FileVisitResult.CONTINUE;
+                }
+                if (attrs.isSymbolicLink()) {
+                    linkFindings.add(real.relativize(file).toString().replace('\\', '/')
+                            + ": symbolic link, skipped");
+                } else if (attrs.isRegularFile()) {
                     files.add(file);
                 }
                 return FileVisitResult.CONTINUE;
@@ -95,13 +105,11 @@ public final class Ledger {
         List<TopicHeader> topics = new ArrayList<>();
         List<TopicHeader> others = new ArrayList<>();
         List<String> findings = new ArrayList<>();
+        linkFindings.sort(null);
+        findings.addAll(linkFindings);
         Map<String, String> firstFileById = new LinkedHashMap<>();
         for (Path file : files) {
             String relative = real.relativize(file).toString().replace('\\', '/');
-            if (!file.toRealPath().startsWith(real)) {
-                findings.add(relative + ": resolves outside the root (symbolic link), skipped");
-                continue;
-            }
             TopicHeader header = TopicHeader.parse(file, real);
             if (header.topic()) {
                 topics.add(header);

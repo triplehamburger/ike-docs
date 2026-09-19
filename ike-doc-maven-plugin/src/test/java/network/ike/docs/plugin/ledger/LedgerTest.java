@@ -258,6 +258,19 @@ class LedgerTest {
     }
 
     @Test
+    void scan_reportsSymbolicLinksAndDoesNotFollowThem(@TempDir Path dir, @TempDir Path outside) throws IOException {
+        Path root = corpus(dir);
+        Path target = outside.resolve("secret.adoc");
+        Files.writeString(target, topic("x-secret", ":topic-status: draft\n", "x-secret"));
+        Files.createSymbolicLink(root.resolve("topics/linked.adoc"), target);
+
+        Ledger.Scan scan = Ledger.scan(root, 100);
+
+        assertThat(scan.topics()).extracting(TopicHeader::id).doesNotContain("x-secret");
+        assertThat(scan.findings()).contains("topics/linked.adoc: symbolic link, skipped");
+    }
+
+    @Test
     void scan_failsPastMaxFiles(@TempDir Path dir) throws IOException {
         Path root = corpus(dir);
         assertThatThrownBy(() -> Ledger.scan(root, 2))
