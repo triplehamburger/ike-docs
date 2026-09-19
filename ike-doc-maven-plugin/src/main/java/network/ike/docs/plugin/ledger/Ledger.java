@@ -6,6 +6,7 @@ import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
@@ -102,15 +103,28 @@ public final class Ledger {
         }
         files.sort((a, b) -> real.relativize(a).toString().compareTo(real.relativize(b).toString()));
 
+        // Parse in parallel; toList() keeps the sorted encounter order.
+        List<TopicHeader> headers;
+        try {
+            headers = files.parallelStream().map(file -> {
+                try {
+                    return TopicHeader.parse(file, real);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }).toList();
+        } catch (UncheckedIOException e) {
+            throw e.getCause();
+        }
+
         List<TopicHeader> topics = new ArrayList<>();
         List<TopicHeader> others = new ArrayList<>();
         List<String> findings = new ArrayList<>();
         linkFindings.sort(null);
         findings.addAll(linkFindings);
         Map<String, String> firstFileById = new LinkedHashMap<>();
-        for (Path file : files) {
-            String relative = real.relativize(file).toString().replace('\\', '/');
-            TopicHeader header = TopicHeader.parse(file, real);
+        for (TopicHeader header : headers) {
+            String relative = header.file();
             if (header.topic()) {
                 topics.add(header);
                 String earlier = firstFileById.putIfAbsent(header.id(), relative);
