@@ -235,7 +235,11 @@ public final class Ledger {
      * @throws IOException if the file cannot be read or is not a ledger
      */
     public static Map<String, Object> load(Path ledgerFile) throws IOException {
-        Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
+        LoaderOptions options = new LoaderOptions();
+        // SnakeYAML refuses documents over 3 MB by default; a ledger of a few
+        // thousand topics is larger than that. 256 MB is far above any corpus.
+        options.setCodePointLimit(256 * 1024 * 1024);
+        Yaml yaml = new Yaml(new SafeConstructor(options));
         try (Reader reader = Files.newBufferedReader(ledgerFile, StandardCharsets.UTF_8)) {
             Object loaded = yaml.load(reader);
             if (!(loaded instanceof Map<?, ?> map) || !(map.get("roots") instanceof List<?>)) {
