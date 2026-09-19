@@ -205,6 +205,24 @@ not match the id, an unknown type or status, the same id in two files
 A module without `src/docs/asciidoc` is skipped with one line, so the
 goal can run from a reactor root. `-Dike.skip.ledger=true` skips it.
 
+The goal's default phase is `validate`, so a POM that declares an
+execution of it gets a fresh ledger on every build, `mvn clean install`
+included, and findings still do not fail that build:
+
+[source,xml]
+----
+<plugin>
+  <groupId>network.ike.docs</groupId>
+  <artifactId>ike-doc-maven-plugin</artifactId>
+  <executions>
+    <execution>
+      <id>ledger</id>
+      <goals><goal>ledger</goal></goals>
+    </execution>
+  </executions>
+</plugin>
+----
+
 == Design rationale
 
 [[_design_rationale]]
