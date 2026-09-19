@@ -144,6 +144,63 @@ class LedgerTest {
     }
 
     @Test
+    void add_insertsNewFilesIntoAnExistingLedgerWithoutRescanning(@TempDir Path dir) throws IOException {
+        Path root = corpus(dir);
+        Path ledgerFile = dir.resolve("target/doc-ledger.yaml");
+        Files.writeString(ledgerFile, Ledger.yaml(Ledger.model(
+                List.of(Ledger.scan(root, 100)), dir, Instant.parse("2026-09-17T12:00:00Z"))));
+        Files.writeString(root.resolve("topics/architecture/z.adoc"), topic("arch-z", ":topic-status: draft\n", "arch-z"));
+        Files.createDirectories(root.resolve("topics/ops"));
+        Files.writeString(root.resolve("topics/ops/m.adoc"), topic("ops-m", ":topic-status: draft\n", "ops-m"));
+        Files.writeString(root.resolve("notes.adoc"), "== Working Notes\n\nText.\n");
+
+        Map<String, Object> loaded = Ledger.load(ledgerFile);
+        List<TopicHeader> added = Ledger.add(loaded, dir,
+                List.of(Path.of("topics/architecture/z.adoc"), Path.of("topics/ops/m.adoc"), root.resolve("notes.adoc")),
+                Instant.parse("2026-09-18T09:00:00Z"));
+        String yaml = Ledger.yaml(loaded);
+
+        assertThat(added).extracting(TopicHeader::file)
+                .containsExactly("topics/architecture/z.adoc", "topics/ops/m.adoc", "notes.adoc");
+        assertThat(yaml)
+                .contains("generated: '2026-09-18T09:00:00Z'")
+                .contains("files: 9").contains("topics: 7")
+                .contains("- dir: topics/ops").contains("- id: ops-m")
+                .contains("file: notes.adoc").contains("title: Working Notes");
+        assertThat(yaml.indexOf("- dir: topics/architecture")).isLessThan(yaml.indexOf("- dir: topics/broken"));
+        assertThat(yaml.indexOf("- dir: topics/broken")).isLessThan(yaml.indexOf("- dir: topics/ops"));
+        assertThat(yaml.indexOf("file: topics/architecture/c.adoc")).isLessThan(yaml.indexOf("file: topics/architecture/z.adoc"));
+        assertThat((List<?>) loaded.get("findings")).hasSize(3);   // the fixture's own three, untouched
+    }
+
+    @Test
+    void add_replacesTheEntryForARereadFile_andChecksDuplicateIdsAgainstTheLedger(@TempDir Path dir) throws IOException {
+        Path root = corpus(dir);
+        Map<String, Object> model = Ledger.model(List.of(Ledger.scan(root, 100)), dir, Instant.now());
+
+        Files.writeString(root.resolve("topics/architecture/a.adoc"), topic("arch-a", ":topic-status: review\n", "arch-a"));
+        Ledger.add(model, dir, List.of(Path.of("topics/architecture/a.adoc")), Instant.now());
+        String yaml = Ledger.yaml(model);
+        assertThat(yaml).contains("files: 6").contains("topics: 5").contains("status: review");
+        assertThat(yaml.split("file: topics/architecture/a.adoc", -1)).hasSize(2);
+
+        Files.writeString(root.resolve("topics/architecture/b2.adoc"), topic("arch-b", ":topic-status: draft\n", "arch-b"));
+        Ledger.add(model, dir, List.of(Path.of("topics/architecture/b2.adoc")), Instant.now());
+        assertThat((List<?>) model.get("findings")).anySatisfy(f -> assertThat(String.valueOf(f))
+                .isEqualTo("topics/architecture/b2.adoc: duplicate id 'arch-b', already declared by topics/architecture/b.adoc"));
+    }
+
+    @Test
+    void add_rejectsFilesOutsideTheLedgerRoots(@TempDir Path dir) throws IOException {
+        Path root = corpus(dir);
+        Map<String, Object> model = Ledger.model(List.of(Ledger.scan(root.resolve("topics"), 100)), dir, Instant.now());
+        Path outside = root.resolve("index.adoc");
+        assertThatThrownBy(() -> Ledger.add(model, dir, List.of(outside), Instant.now()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("none of the ledger's roots");
+    }
+
+    @Test
     void scan_failsPastMaxFiles(@TempDir Path dir) throws IOException {
         Path root = corpus(dir);
         assertThatThrownBy(() -> Ledger.scan(root, 2))

@@ -1,9 +1,13 @@
 package network.ike.docs.plugin.ledger;
 
 import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.SafeConstructor;
 
 import java.io.IOException;
+import java.io.Reader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +16,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -154,20 +159,7 @@ public final class Ledger {
             rootEntry.put("directories", directories);
             List<Object> otherFiles = new ArrayList<>();
             for (TopicHeader o : scan.others()) {
-                Map<String, Object> entry = new LinkedHashMap<>();
-                entry.put("file", o.file());
-                entry.put("kind", o.includes() > 0 ? "assembly" : "plain");
-                if (o.title() != null) {
-                    entry.put("title", o.title());
-                    if (o.level() != 1) {
-                        entry.put("level", o.level());
-                    }
-                }
-                if (!o.documentAttributes().isEmpty()) {
-                    entry.put("attributes", new LinkedHashMap<>(o.documentAttributes()));
-                }
-                entry.put("includes", o.includes());
-                otherFiles.add(entry);
+                otherFiles.add(otherEntry(o));
             }
             rootEntry.put("other-files", otherFiles);
             roots.add(rootEntry);
@@ -233,6 +225,203 @@ public final class Ledger {
             }
         }
         return lines;
+    }
+
+    /**
+     * Read a ledger written by {@link #yaml(Map)} back into its model.
+     *
+     * @param ledgerFile the ledger file
+     * @return the model, with the same shape {@link #model} produces
+     * @throws IOException if the file cannot be read or is not a ledger
+     */
+    public static Map<String, Object> load(Path ledgerFile) throws IOException {
+        Yaml yaml = new Yaml(new SafeConstructor(new LoaderOptions()));
+        try (Reader reader = Files.newBufferedReader(ledgerFile, StandardCharsets.UTF_8)) {
+            Object loaded = yaml.load(reader);
+            if (!(loaded instanceof Map<?, ?> map) || !(map.get("roots") instanceof List<?>)) {
+                throw new IOException("Not a ledger: " + ledgerFile);
+            }
+            @SuppressWarnings("unchecked")
+            Map<String, Object> model = (Map<String, Object>) map;
+            return model;
+        }
+    }
+
+    /**
+     * Add files to an existing ledger, or refresh their entries, without
+     * rescanning the roots: each file is parsed alone, placed in its directory
+     * group in path order, counted, and checked for a duplicate id against the
+     * ids the ledger already holds. An entry for the same file is replaced, so
+     * a re-ingested document is safe to add again. Files the ledger lists but
+     * that no longer exist are not noticed here; a full scan is.
+     *
+     * @param model the ledger model, from {@link #model} or {@link #load};
+     *              updated in place
+     * @param base  the module base directory the ledger's roots are relative to
+     * @param files the files to add, relative to {@code base} or absolute; each
+     *              must be an {@code .adoc} file under one of the ledger's roots
+     * @param now   the update instant, recorded as {@code generated}
+     * @return the parsed headers of the added files, in the order given
+     * @throws IOException              if a file cannot be read
+     * @throws IllegalArgumentException if a file is missing, is not AsciiDoc,
+     *                                  or lies under none of the ledger's roots
+     */
+    @SuppressWarnings("unchecked")
+    public static List<TopicHeader> add(Map<String, Object> model, Path base, List<Path> files,
+                                        Instant now) throws IOException {
+        List<Map<String, Object>> roots = (List<Map<String, Object>>) model.get("roots");
+        List<String> findings = new ArrayList<>();
+        for (Object f : (List<Object>) model.getOrDefault("findings", List.of())) {
+            findings.add(String.valueOf(f));
+        }
+        List<TopicHeader> added = new ArrayList<>();
+        for (Path file : files) {
+            Path abs = base.resolve(file);
+            if (!Files.isRegularFile(abs)) {
+                throw new IllegalArgumentException("Not a file: " + abs);
+            }
+            if (!abs.getFileName().toString().endsWith(".adoc")) {
+                throw new IllegalArgumentException("Not an AsciiDoc file: " + abs);
+            }
+            Path real = abs.toRealPath();
+            Map<String, Object> rootEntry = null;
+            Path rootPath = null;
+            List<String> rootNames = new ArrayList<>();
+            for (Map<String, Object> r : roots) {
+                String name = String.valueOf(r.get("root"));
+                rootNames.add(name);
+                Path candidate = base.resolve(name);
+                if (Files.isDirectory(candidate) && real.startsWith(candidate.toRealPath())) {
+                    rootEntry = r;
+                    rootPath = candidate.toRealPath();
+                    break;
+                }
+            }
+            if (rootEntry == null) {
+                throw new IllegalArgumentException(abs + " is under none of the ledger's roots "
+                        + rootNames + "; run a full idoc:ledger instead");
+            }
+            TopicHeader header = TopicHeader.parse(real, rootPath);
+            String relative = header.file();
+            remove(rootEntry, relative);
+            findings.removeIf(f -> f.startsWith(relative + ": "));
+            if (header.topic()) {
+                String earlier = fileDeclaring(roots, header.id());
+                if (earlier != null) {
+                    findings.add(relative + ": duplicate id '" + header.id()
+                            + "', already declared by " + earlier);
+                }
+                insertTopic(rootEntry, header);
+            } else {
+                insertOther(rootEntry, header);
+            }
+            for (String f : header.findings()) {
+                findings.add(relative + ": " + f);
+            }
+            recount(rootEntry);
+            added.add(header);
+        }
+        model.put("generated", now.truncatedTo(ChronoUnit.SECONDS).toString());
+        model.put("findings", findings);
+        return added;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> listOf(Map<String, Object> holder, String key) {
+        return (List<Map<String, Object>>) holder.computeIfAbsent(key, k -> new ArrayList<>());
+    }
+
+    private static void remove(Map<String, Object> rootEntry, String relative) {
+        for (Iterator<Map<String, Object>> it = listOf(rootEntry, "directories").iterator(); it.hasNext();) {
+            Map<String, Object> dir = it.next();
+            List<Map<String, Object>> topics = listOf(dir, "topics");
+            topics.removeIf(t -> relative.equals(t.get("file")));
+            if (topics.isEmpty()) {
+                it.remove();
+            }
+        }
+        listOf(rootEntry, "other-files").removeIf(o -> relative.equals(o.get("file")));
+    }
+
+    private static String fileDeclaring(List<Map<String, Object>> roots, String id) {
+        for (Map<String, Object> r : roots) {
+            for (Map<String, Object> dir : listOf(r, "directories")) {
+                for (Map<String, Object> t : listOf(dir, "topics")) {
+                    if (id.equals(t.get("id"))) {
+                        return String.valueOf(t.get("file"));
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static void insertTopic(Map<String, Object> rootEntry, TopicHeader header) {
+        List<Map<String, Object>> dirs = listOf(rootEntry, "directories");
+        String dirName = directoryOf(header.file());
+        String key = dirName.isEmpty() ? "." : dirName;
+        Map<String, Object> group = null;
+        int position = 0;
+        for (int i = 0; i < dirs.size(); i++) {
+            String d = String.valueOf(dirs.get(i).get("dir"));
+            if (d.equals(key)) {
+                group = dirs.get(i);
+                break;
+            }
+            if (d.compareTo(key) < 0) {
+                position = i + 1;
+            }
+        }
+        if (group == null) {
+            group = new LinkedHashMap<>();
+            group.put("dir", key);
+            group.put("topics", new ArrayList<>());
+            dirs.add(position, group);
+        }
+        List<Map<String, Object>> topics = listOf(group, "topics");
+        int at = 0;
+        while (at < topics.size()
+                && String.valueOf(topics.get(at).get("file")).compareTo(header.file()) < 0) {
+            at++;
+        }
+        topics.add(at, topicEntry(header));
+    }
+
+    private static void insertOther(Map<String, Object> rootEntry, TopicHeader header) {
+        List<Map<String, Object>> others = listOf(rootEntry, "other-files");
+        int at = 0;
+        while (at < others.size()
+                && String.valueOf(others.get(at).get("file")).compareTo(header.file()) < 0) {
+            at++;
+        }
+        others.add(at, otherEntry(header));
+    }
+
+    private static void recount(Map<String, Object> rootEntry) {
+        int topics = 0;
+        for (Map<String, Object> dir : listOf(rootEntry, "directories")) {
+            topics += listOf(dir, "topics").size();
+        }
+        int others = listOf(rootEntry, "other-files").size();
+        rootEntry.put("files", topics + others);
+        rootEntry.put("topics", topics);
+    }
+
+    private static Map<String, Object> otherEntry(TopicHeader o) {
+        Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("file", o.file());
+        entry.put("kind", o.includes() > 0 ? "assembly" : "plain");
+        if (o.title() != null) {
+            entry.put("title", o.title());
+            if (o.level() != 1) {
+                entry.put("level", o.level());
+            }
+        }
+        if (!o.documentAttributes().isEmpty()) {
+            entry.put("attributes", new LinkedHashMap<>(o.documentAttributes()));
+        }
+        entry.put("includes", o.includes());
+        return entry;
     }
 
     private static Map<String, Object> topicEntry(TopicHeader t) {
