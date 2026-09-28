@@ -32,7 +32,7 @@
 
     <groupId>network.ike.docs</groupId>
     <artifactId>ike-docs</artifactId>
-    <version>109-SNAPSHOT</version>
+    <version>116-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <name>IKE Docs</name>
@@ -109,14 +109,14 @@
              existing ${ike-tooling.version} references keep
              resolving via the one-line indirection.
              See IKE-Network/ike-issues#470, #496, #525. -->
-        <network.ike.tooling__GA__ike-tooling__VERSION>253</network.ike.tooling__GA__ike-tooling__VERSION>
+        <network.ike.tooling__GA__ike-tooling__VERSION>260</network.ike.tooling__GA__ike-tooling__VERSION>
         <ike-tooling.version>${network.ike.tooling__GA__ike-tooling__VERSION}</ike-tooling.version>
 
         <!-- Build Configuration -->
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <!-- Reproducible builds — maven-release-plugin updates automatically -->
-        <project.build.outputTimestamp>2026-08-23T05:08:07Z</project.build.outputTimestamp>
+        <project.build.outputTimestamp>2026-09-27T21:47:47Z</project.build.outputTimestamp>
 
         <!-- ── Java Configuration (from java-parent) ─────────────────── -->
         <java.version>25</java.version>
