@@ -197,7 +197,17 @@ to the build log as a tree.
 mvn idoc:ledger                                  # the module's src/docs/asciidoc
 mvn idoc:ledger -Dike.ledger.roots=a,b           # other roots, comma-separated
 mvn idoc:ledger -Dike.ledger.output=/tmp/l.yaml  # write elsewhere
+mvn idoc:ledger -Dike.ledger.add=topics/x/new.adoc   # add an ingested file, no rescan
 ----
+
+With `-Dike.ledger.add=` (comma-separated files, relative to the
+module or absolute) the named files are parsed alone and merged into
+the existing ledger: placed in their directory group in path order,
+counted, and checked for a duplicate id against the ids the ledger
+already holds. An entry for the same file is replaced, so re-ingesting
+a document is safe. Files that were deleted are not noticed this way;
+a run without `add` re-derives everything, and runs when no ledger
+exists yet.
 
 Header findings -- a missing required attribute, an anchor that does
 not match the id, an unknown type or status, the same id in two files
