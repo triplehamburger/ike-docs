@@ -43,17 +43,16 @@ import java.util.Map;
  *   mvn idoc:ledger -Dike.ledger.add=topics/x/new.adoc   # add one ingested file, no rescan
  * </pre>
  *
- * <p>With {@code -Dike.ledger.add} the named files are parsed alone and merged
- * into the existing ledger: placed in their directory group, counted, and
- * checked for a duplicate id against the ledger. An entry for the same file
- * is replaced, so re-ingesting is safe. Deleted files are not noticed that
- * way; a run without {@code add} re-derives everything.
+ * <p>The default phase is {@code validate}: the goal reads sources and
+ * writes only under {@code target/}, so an execution declared without a
+ * phase (as {@code ike-parent} does for {@code lint-site}) refreshes the
+ * ledger on every build, including a bare {@code mvn validate}.
  *
  * <p>Skip with {@code -Dike.skip.ledger=true}.
  *
  * @since 109
  */
-@Mojo(name = "ledger")
+@Mojo(name = "ledger", defaultPhase = "validate")
 public class LedgerMojo implements org.apache.maven.api.plugin.Mojo {
 
     @org.apache.maven.api.di.Inject
