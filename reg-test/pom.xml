@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Standalone test project for idoc:topic-registry. Not part of the reactor.
+  Run `mvn install` at the repository root first, then `mvn idoc:topic-registry` here.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>network.ike.docs.test</groupId>
+    <artifactId>reg-test</artifactId>
+    <version>1</version>
+    <packaging>pom</packaging>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>network.ike.docs</groupId>
+                <artifactId>ike-doc-maven-plugin</artifactId>
+                <version>116-SNAPSHOT</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

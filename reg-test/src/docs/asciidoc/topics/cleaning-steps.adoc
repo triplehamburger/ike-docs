@@ -1,0 +1,8 @@
+:topic-id: ops-cleaning-steps
+:topic-type: procedure
+:topic-keywords: cleaning, maintenance
+
+[[ops-cleaning]]
+= Cleaning Steps
+
+A broken topic: it has no :topic-status: and its anchor does not match its id.

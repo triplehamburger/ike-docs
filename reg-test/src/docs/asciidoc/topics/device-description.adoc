@@ -1,0 +1,9 @@
+:topic-id: dev-device-description
+:topic-type: concept
+:topic-status: draft
+:topic-keywords: device, description
+
+[[dev-device-description]]
+= Device Description
+
+A valid topic: every required attribute is present and the anchor matches the id.
