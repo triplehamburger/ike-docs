@@ -1,20 +1,15 @@
 package network.ike.docs.plugin;
 
-import network.ike.docs.plugin.registry.TopicHeader;
-import network.ike.docs.plugin.registry.TopicRegistry;
+import network.ike.docs.plugin.registry.TopicRegistryMain;
 import org.apache.maven.api.plugin.MojoException;
 import org.apache.maven.api.plugin.annotations.Mojo;
 import org.apache.maven.api.plugin.annotations.Parameter;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Generate the topic registry: every AsciiDoc file under the module's source
@@ -135,155 +130,26 @@ public class TopicRegistryMojo implements org.apache.maven.api.plugin.Mojo {
             getLog().debug("idoc:topic-registry — skipped");
             return;
         }
-        long started = System.nanoTime();
         Path base = project.getBasedir();
-        boolean fromRootFile = rootFile != null && !rootFile.isBlank();
-        if (fromRootFile && add != null && !add.isBlank()) {
-            throw new MojoException("-Dike.topic-registry.rootFile and -Dike.topic-registry.add"
-                    + " cannot be combined; run with one or the other");
-        }
-        if (add != null && !add.isBlank()) {
-            if (Files.isRegularFile(output.toPath())) {
-                addToRegistry(base, output.toPath(), started);
-                return;
-            }
-            getLog().info("idoc:topic-registry — no generated registry at " + output
-                    + " yet, running the full scan");
-        }
-        Path defaultRoot = base.resolve("src/docs/asciidoc");
-        List<Path> rootPaths = new ArrayList<>();
-        for (String r : roots.split(",")) {
-            if (!r.isBlank()) {
-                rootPaths.add(Path.of(r.strip()));
-            }
-        }
-        if (!fromRootFile && rootPaths.size() == 1 && rootPaths.get(0).toAbsolutePath().normalize()
-                .equals(defaultRoot.toAbsolutePath().normalize())
-                && !Files.isDirectory(defaultRoot)) {
-            getLog().info("idoc:topic-registry — no src/docs/asciidoc in " + base.getFileName()
-                    + ", skipping");
-            return;
-        }
-
-        List<TopicRegistry.Scan> scans = new ArrayList<>();
-        if (fromRootFile) {
-            scans.add(scanFromRootFile(base, rootPaths));
-        } else {
-            for (Path root : rootPaths) {
-                if (!Files.isDirectory(root)) {
-                    throw new MojoException("Registry root does not exist: " + root
-                            + " (check -Dike.topic-registry.roots)");
-                }
-                try {
-                    scans.add(TopicRegistry.scan(root, maxFiles));
-                } catch (IOException e) {
-                    throw new MojoException("Cannot scan " + root + ": " + e.getMessage(), e);
-                } catch (IllegalStateException e) {
-                    throw new MojoException(e.getMessage(), e);
-                }
-            }
-        }
-
-        String yaml = TopicRegistry.yaml(TopicRegistry.model(scans, base, Instant.now()));
-        Path out = output.toPath();
+        TopicRegistryMain.Options options = new TopicRegistryMain.Options(base,
+                paths(base, roots), output.toPath(), maxFiles, paths(base, add),
+                rootFile == null || rootFile.isBlank() ? null : base.resolve(rootFile.strip()));
         try {
-            Files.createDirectories(out.getParent());
-            Files.writeString(out, yaml, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new MojoException("Cannot write the registry to " + out + ": " + e.getMessage(), e);
-        }
-
-        int topics = 0;
-        int others = 0;
-        int findings = 0;
-        for (TopicRegistry.Scan scan : scans) {
-            for (String line : TopicRegistry.tree(scan, base)) {
-                getLog().info(line);
-            }
-            topics += scan.topics().size();
-            others += scan.others().size();
-            findings += scan.findings().size();
-            for (String finding : scan.findings()) {
-                getLog().warn("registry: " + finding);
-            }
-        }
-        long millis = (System.nanoTime() - started) / 1_000_000;
-        getLog().info(topics + " topic" + (topics == 1 ? "" : "s") + ", " + others
-                + " other file" + (others == 1 ? "" : "s") + ", " + findings
-                + " finding" + (findings == 1 ? "" : "s") + "; topic registry written to "
-                + shown(base, out) + " (" + millis + " ms)");
-    }
-
-    private TopicRegistry.Scan scanFromRootFile(Path base, List<Path> rootPaths) throws MojoException {
-        Path file = base.resolve(rootFile.strip());
-        if (!Files.isRegularFile(file)) {
-            throw new MojoException("Root file does not exist: " + file
-                    + " (check -Dike.topic-registry.rootFile)");
-        }
-        try {
-            Path realFile = file.toRealPath();
-            for (Path root : rootPaths) {
-                if (Files.isDirectory(root) && realFile.startsWith(root.toRealPath())) {
-                    getLog().info("idoc:topic-registry — from root file " + shown(base, file));
-                    return TopicRegistry.scanFrom(root, file);
-                }
-            }
-        } catch (IOException e) {
-            throw new MojoException("Cannot scan from " + file + ": " + e.getMessage(), e);
-        } catch (IllegalArgumentException e) {
+            TopicRegistryMain.run(options, getLog()::info, getLog()::warn);
+        } catch (IllegalArgumentException | IllegalStateException | IOException e) {
             throw new MojoException(e.getMessage(), e);
         }
-        throw new MojoException("Root file " + file + " is under none of the registry roots "
-                + rootPaths + " (check -Dike.topic-registry.roots)");
     }
 
-    private void addToRegistry(Path base, Path out, long started) throws MojoException {
-        List<Path> files = new ArrayList<>();
-        for (String f : add.split(",")) {
-            if (!f.isBlank()) {
-                files.add(Path.of(f.strip()));
-            }
-        }
-        Map<String, Object> model;
-        try {
-            model = TopicRegistry.load(out);
-        } catch (IOException e) {
-            throw new MojoException("Cannot read the generated registry " + out + ": "
-                    + e.getMessage(), e);
-        }
-        List<TopicHeader> added;
-        try {
-            added = TopicRegistry.add(model, base, files, Instant.now());
-        } catch (IllegalArgumentException e) {
-            throw new MojoException(e.getMessage(), e);
-        } catch (IOException e) {
-            throw new MojoException("Cannot read a file to add: " + e.getMessage(), e);
-        }
-        try {
-            Files.writeString(out, TopicRegistry.yaml(model), StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new MojoException("Cannot write the registry to " + out + ": " + e.getMessage(), e);
-        }
-        for (TopicHeader h : added) {
-            getLog().info("registry: " + (h.topic() ? "topic " + h.id() + " at " : "file ") + h.file());
-        }
-        @SuppressWarnings("unchecked")
-        List<Object> findings = (List<Object>) model.get("findings");
-        for (Object f : findings) {
-            for (TopicHeader h : added) {
-                if (String.valueOf(f).startsWith(h.file() + ": ")) {
-                    getLog().warn("registry: " + f);
+    private static List<Path> paths(Path base, String commaSeparated) {
+        List<Path> paths = new ArrayList<>();
+        if (commaSeparated != null) {
+            for (String p : commaSeparated.split(",")) {
+                if (!p.isBlank()) {
+                    paths.add(base.resolve(p.strip()));
                 }
             }
         }
-        long millis = (System.nanoTime() - started) / 1_000_000;
-        getLog().info("added " + added.size() + " file" + (added.size() == 1 ? "" : "s")
-                + " to " + shown(base, out) + " without rescanning (" + millis + " ms)");
-    }
-
-    private static String shown(Path base, Path out) {
-        return out.toAbsolutePath().startsWith(base.toAbsolutePath())
-                ? base.toAbsolutePath().relativize(out.toAbsolutePath()).toString()
-                : out.toString();
+        return paths;
     }
 }
