@@ -1,9 +1,17 @@
 package network.ike.docs.ingest;
 
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/// Synthetic decision-summary text shaped like the real FDA
+/// Synthetic decision-summary text and PDFs shaped like the real FDA
 /// layouts, so tests run without committing any FDA file.
 final class DexTexts {
 
@@ -156,5 +164,43 @@ final class DexTexts {
             }
         }
         return pages;
+    }
+
+    /// Write a text PDF with one page per string.
+    static void writePdf(Path file, List<String> pageTexts) throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            for (String text : pageTexts) {
+                PDPage page = new PDPage();
+                doc.addPage(page);
+                try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                    cs.beginText();
+                    cs.setFont(font, 10);
+                    cs.setLeading(12);
+                    cs.newLineAtOffset(40, 760);
+                    for (String line : text.split("\n")) {
+                        cs.showText(line);
+                        cs.newLine();
+                    }
+                    cs.endText();
+                }
+            }
+            doc.save(file.toFile());
+        }
+    }
+
+    /// Write a PDF whose pages have no text, like a scan with nothing recognizable as text.
+    static void writeBlankPdf(Path file, int pages) throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            for (int i = 0; i < pages; i++) {
+                PDPage page = new PDPage();
+                doc.addPage(page);
+                try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+                    cs.addRect(50, 50, 200, 100);
+                    cs.fill();
+                }
+            }
+            doc.save(file.toFile());
+        }
     }
 }
