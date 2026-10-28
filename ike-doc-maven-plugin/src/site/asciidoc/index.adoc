@@ -107,6 +107,10 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   group, a topic's directory equals its id's domain prefix, images
   are inside packages. Lines still using `{topics}` are warnings.
 
+| `idoc:ingest-coverage`
+| Check that the topics written from a source PDF still hold what the PDF
+  says, page by page. See xref:ingest-coverage[Ingest coverage] below.
+
 | `idoc:adocstudio`
 | Generate Adoc Studio sidecar projects for assembly modules.
 
@@ -367,6 +371,30 @@ the root or directly under a group. An include or image line that
 still uses the `{topics}` alias is a warning naming the file and line,
 so the alias can be retired once the last one is gone.
 `-Dike.skip.lint-packages=true` skips it.
+
+[[ingest-coverage]]
+== Ingest coverage (`idoc:ingest-coverage`)
+
+`idoc:ingest-coverage` compares the words and numbers of a source PDF with
+the topics written from it, so a topic set that dropped sections fails the
+build instead of passing as a summary. Running page headers, footers and
+page numbers are left out of the PDF's count.
+
+[source,bash]
+----
+mvn idoc:ingest-coverage -Dike.ingest.source=K230440.pdf -Dike.ingest.topics=topics
+----
+
+The goal writes `target/ingest/coverage.yaml` and fails when:
+
+* the topics lack more of the PDF's words than `ike.ingest.maxMissing`
+  allows (default `0.10`);
+* a decision summary's section title does not appear in the topics; or
+* the PDF is scanned (transcribe it with `idoc:ingest-detect` first) or
+  cannot be read.
+
+Pages where less than 60% of the distinct words are in the topics are
+listed as warnings, which is how a dropped section shows.
 
 == Design rationale
 
