@@ -28,6 +28,9 @@
 /// - {@link network.ike.docs.ingest.Answers} — validate the answers to
 ///   open work orders and merge the valid ones; a rejected answer keeps its
 ///   item open and never blocks the rest
+/// - {@link network.ike.docs.ingest.DexDetector} — decide from page text
+///   whether a source is an FDA 510(k) decision summary, and which layout
+///   and template it uses
 ///
 /// See IKE-Network/ike-issues#550 for the design proposal that
 /// factored this module out of `hl7-ig-corpus-example/ingest/`.
