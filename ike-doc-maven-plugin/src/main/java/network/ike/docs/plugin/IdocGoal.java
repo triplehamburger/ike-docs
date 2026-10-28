@@ -45,6 +45,11 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest-coverage} — check that topics still hold what their source PDF says. */
+    INGEST_COVERAGE("ingest-coverage", IngestCoverageMojo.class,
+            "Compare a source PDF's words with the topics written from it, "
+                    + "page by page, and check each decision-summary section "
+                    + "title appears. Writes coverage.yaml."),
     /** {@code idoc:ingest-detect} — classify a source PDF as a 510(k) decision summary or not. */
     INGEST_DETECT("ingest-detect", IngestDetectMojo.class,
             "Classify a source PDF as an FDA 510(k) decision summary (layout, "
