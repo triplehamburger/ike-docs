@@ -45,6 +45,11 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest-coverage} — check that topics still hold what their source PDF says. */
+    INGEST_COVERAGE("ingest-coverage", IngestCoverageMojo.class,
+            "Compare a source PDF's words with the topics written from it, "
+                    + "page by page, and check each decision-summary section "
+                    + "title appears. Writes coverage.yaml."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="
