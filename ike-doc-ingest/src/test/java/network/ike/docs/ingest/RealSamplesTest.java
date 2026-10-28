@@ -72,14 +72,18 @@ class RealSamplesTest {
     }
 
     @Test
-    void aGudidRecordIsNotADecisionSummary() throws Exception {
+    void aGudidRecordIsADexCompanion() throws Exception {
         IngestReport r = detect("AccessGUDID");
-        assertThat(r.details()).containsEntry("kind", "NOT_DEX").containsEntry("guess", "gudid-record");
+        assertThat(r.details()).containsEntry("kind", "DEX_GUDID").containsEntry("domain", "dex")
+                .containsEntry("companion", "gudid-record").containsEntry("di-number", "07332940008581");
+        assertThat(r.hasErrors()).isFalse();
     }
 
     @Test
-    void anInstructionsForUseIsNotADecisionSummary() throws Exception {
+    void anInstructionsForUseIsADexCompanion() throws Exception {
         IngestReport r = detect("Xpert Xpress");
-        assertThat(r.details()).containsEntry("kind", "NOT_DEX").containsEntry("guess", "manufacturer-ifu");
+        assertThat(r.details()).containsEntry("kind", "DEX_IFU").containsEntry("domain", "dex")
+                .containsEntry("companion", "manufacturer-ifu");
+        assertThat(r.hasErrors()).isFalse();
     }
 }

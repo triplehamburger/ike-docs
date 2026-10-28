@@ -70,9 +70,21 @@ public final class IngestDetect {
                 "name", s.name(), "page", s.page(), "found", s.found())).toList());
         details.put("sections", detection.sections().stream().map(s -> orderedMap(
                 "label", s.label(), "title", s.title(), "page", s.page())).toList());
+        boolean dex = detection.kind() != DexDetector.Kind.NOT_DEX;
+        if (dex) {
+            details.put("domain", "dex");
+        }
         if (detection.kind() == DexDetector.Kind.DEX_510K) {
             details.put("k-number", detection.kNumber());
             describeProvenance(detection.kNumber(), name, citationUrl, details, findings);
+        } else if (dex) {
+            details.put("companion", detection.guess());
+            if (detection.kind() == DexDetector.Kind.DEX_GUDID) {
+                String di = DexDetector.deviceIdentifier(texts.get(0));
+                if (!di.isEmpty()) {
+                    details.put("di-number", di);
+                }
+            }
         } else {
             details.put("guess", detection.guess());
         }

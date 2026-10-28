@@ -75,14 +75,37 @@ class IngestDetectTest {
     }
 
     @Test
-    void aNonDecisionSummaryIsReportedNotDexWithAGuess() throws IOException {
-        Path pdf = dir.resolve("ifu.pdf");
-        DexTexts.writePdf(pdf, List.of("Xpert Xpress CoV-2 plus\nInstructions for Use\n"
+    void aGudidRecordAndAnIfuAreReportedAsDexCompanions() throws IOException {
+        Path gudid = dir.resolve("gudid.pdf");
+        DexTexts.writePdf(gudid, List.of("AccessGUDID - DEVICE: GeneXpert\nDEVICE IDENTIFIER (DI) INFORMATION\n"
+                + "Primary DI Number: 07332940008581\nBrand Name: GeneXpert and more words to avoid sparse text"));
+        Path ifu = dir.resolve("ifu.pdf");
+        DexTexts.writePdf(ifu, List.of("Xpert Xpress CoV-2 plus\nInstructions for Use\n"
                 + "For Use with GeneXpert Dx System and some more words to avoid sparse text"));
+
+        IngestReport g = IngestDetect.run(gudid, null);
+        IngestReport i = IngestDetect.run(ifu, null);
+
+        assertThat(g.details()).containsEntry("kind", "DEX_GUDID").containsEntry("domain", "dex")
+                .containsEntry("companion", "gudid-record").containsEntry("di-number", "07332940008581");
+        assertThat(i.details()).containsEntry("kind", "DEX_IFU").containsEntry("domain", "dex")
+                .containsEntry("companion", "manufacturer-ifu").doesNotContainKey("di-number");
+        assertThat(g.details()).doesNotContainKey("k-number");
+        assertThat(checks(g)).contains("companion-document");
+        assertThat(g.hasErrors()).isFalse();
+        assertThat(i.hasErrors()).isFalse();
+    }
+
+    @Test
+    void aClearanceLetterIsReportedNotDexWithAGuess() throws IOException {
+        Path pdf = dir.resolve("letter.pdf");
+        DexTexts.writePdf(pdf, List.of("February 6, 2026\nRe: K251543\nDear Kelly Scuderi:\n"
+                + "We have reviewed your section 510(k) premarket notification and more words to avoid sparse text"));
 
         IngestReport r = IngestDetect.run(pdf, null);
 
-        assertThat(r.details()).containsEntry("kind", "NOT_DEX").containsEntry("guess", "manufacturer-ifu");
+        assertThat(r.details()).containsEntry("kind", "NOT_DEX").containsEntry("guess", "fda-clearance-letter")
+                .doesNotContainKey("domain");
         assertThat(r.details()).doesNotContainKey("k-number");
         assertThat(r.hasErrors()).isFalse();
     }
