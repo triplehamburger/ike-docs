@@ -71,6 +71,15 @@
             <version>2.3</version>
         </dependency>
 
+        <!-- PDF text for source detection and page images for the scanned
+             fallback. Used only through PdfPages. Scans stored as JBIG2 or
+             JPEG 2000 may additionally need an ImageIO plugin to render. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.8</version>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
