@@ -63,6 +63,14 @@
             <version>1.27.1</version>
         </dependency>
 
+        <!-- Deterministic YAML for the ingest report and work-order files.
+             Same version the doc plugin pins. -->
+        <dependency>
+            <groupId>org.yaml</groupId>
+            <artifactId>snakeyaml</artifactId>
+            <version>2.3</version>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>

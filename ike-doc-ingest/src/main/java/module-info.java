@@ -19,6 +19,12 @@
 ///   `_includes.adoc` assembly-composition manifests
 /// - {@link network.ike.docs.ingest.IngestUtil} — pure helpers
 ///   (safe slug, YAML escape, truncate, strip markup)
+/// - {@link network.ike.docs.ingest.IngestReport},
+///   {@link network.ike.docs.ingest.Finding} and
+///   {@link network.ike.docs.ingest.NeedsAi} — the deterministic ingest
+///   contract: every problem is a finding, every decision a tool cannot
+///   make is a work order, and both are written as deterministic YAML by
+///   {@link network.ike.docs.ingest.IngestYaml}
 ///
 /// See IKE-Network/ike-issues#550 for the design proposal that
 /// factored this module out of `hl7-ig-corpus-example/ingest/`.
@@ -26,5 +32,6 @@ module network.ike.docs.ingest {
     exports network.ike.docs.ingest;
 
     requires org.apache.commons.compress;
+    requires org.yaml.snakeyaml;
     requires java.net.http;
 }
