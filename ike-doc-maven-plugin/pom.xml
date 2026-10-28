@@ -187,6 +187,13 @@
             <artifactId>typst-asciidoc-converter</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <!-- Deterministic ingest contract and source detection (idoc:ingest-*).
+             Brings PDFBox and SnakeYAML; intra-reactor sibling in ike-docs. -->
+        <dependency>
+            <groupId>network.ike.docs</groupId>
+            <artifactId>ike-doc-ingest</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         <!-- Shared rendering resources on the plugin classpath so
              idoc:diff can self-provision the branded prawn theme when a
              pipeline build hasn't unpacked it (ike-issues#649). -->
