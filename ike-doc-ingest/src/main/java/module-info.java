@@ -26,6 +26,8 @@
 /// - {@link network.ike.docs.ingest.DexDetector} — decide from page text
 ///   whether a source is an FDA 510(k) decision summary, and which layout
 ///   and template it uses
+/// - {@link network.ike.docs.ingest.IngestDetect} — classify a source PDF
+///   as a decision summary or not
 ///
 /// See IKE-Network/ike-issues#550 for the design proposal that
 /// factored this module out of `hl7-ig-corpus-example/ingest/`.
@@ -34,5 +36,6 @@ module network.ike.docs.ingest {
 
     requires org.apache.commons.compress;
     requires org.yaml.snakeyaml;
+    requires org.apache.pdfbox;
     requires java.net.http;
 }

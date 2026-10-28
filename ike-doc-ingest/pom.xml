@@ -71,6 +71,13 @@
             <version>2.3</version>
         </dependency>
 
+        <!-- PDF text for source detection. Used only through PdfPages. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.8</version>
+        </dependency>
+
         <dependency>
             <groupId>org.junit.jupiter</groupId>
             <artifactId>junit-jupiter</artifactId>
