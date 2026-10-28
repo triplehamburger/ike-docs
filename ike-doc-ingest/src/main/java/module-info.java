@@ -25,6 +25,9 @@
 ///   contract: every problem is a finding, every decision a tool cannot
 ///   make is a work order, and both are written as deterministic YAML by
 ///   {@link network.ike.docs.ingest.IngestYaml}
+/// - {@link network.ike.docs.ingest.Answers} — validate the answers to
+///   open work orders and merge the valid ones; a rejected answer keeps its
+///   item open and never blocks the rest
 ///
 /// See IKE-Network/ike-issues#550 for the design proposal that
 /// factored this module out of `hl7-ig-corpus-example/ingest/`.
