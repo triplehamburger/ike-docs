@@ -99,14 +99,37 @@ class IngestDetectTest {
     }
 
     @Test
-    void aNonDecisionSummaryIsReportedNotDexWithAGuess() throws IOException {
-        Path pdf = dir.resolve("ifu.pdf");
-        DexTexts.writePdf(pdf, List.of("Xpert Xpress CoV-2 plus\nInstructions for Use\n"
+    void aGudidRecordAndAnIfuAreReportedAsDexCompanions() throws IOException {
+        Path gudid = dir.resolve("gudid.pdf");
+        DexTexts.writePdf(gudid, List.of("AccessGUDID - DEVICE: GeneXpert\nDEVICE IDENTIFIER (DI) INFORMATION\n"
+                + "Primary DI Number: 07332940008581\nBrand Name: GeneXpert and more words to avoid sparse text"));
+        Path ifu = dir.resolve("ifu.pdf");
+        DexTexts.writePdf(ifu, List.of("Xpert Xpress CoV-2 plus\nInstructions for Use\n"
                 + "For Use with GeneXpert Dx System and some more words to avoid sparse text"));
+
+        IngestDetect.Result g = run(gudid, options(), null);
+        IngestDetect.Result i = run(ifu, options(), null);
+
+        assertThat(g.report().details()).containsEntry("kind", "DEX_GUDID").containsEntry("domain", "dex")
+                .containsEntry("companion", "gudid-record").containsEntry("di-number", "07332940008581");
+        assertThat(i.report().details()).containsEntry("kind", "DEX_IFU").containsEntry("domain", "dex")
+                .containsEntry("companion", "manufacturer-ifu").doesNotContainKey("di-number");
+        assertThat(g.report().details()).doesNotContainKey("k-number");
+        assertThat(checks(g.report())).contains("companion-document");
+        assertThat(g.report().hasErrors()).isFalse();
+        assertThat(i.report().hasErrors()).isFalse();
+    }
+
+    @Test
+    void aClearanceLetterIsReportedNotDexWithAGuess() throws IOException {
+        Path pdf = dir.resolve("letter.pdf");
+        DexTexts.writePdf(pdf, List.of("February 6, 2026\nRe: K251543\nDear Kelly Scuderi:\n"
+                + "We have reviewed your section 510(k) premarket notification and more words to avoid sparse text"));
 
         IngestDetect.Result r = run(pdf, options(), null);
 
-        assertThat(r.report().details()).containsEntry("kind", "NOT_DEX").containsEntry("guess", "manufacturer-ifu");
+        assertThat(r.report().details()).containsEntry("kind", "NOT_DEX").containsEntry("guess", "fda-clearance-letter")
+                .doesNotContainKey("domain");
         assertThat(r.report().details()).doesNotContainKey("k-number");
         assertThat(r.report().hasErrors()).isFalse();
     }
@@ -168,11 +191,24 @@ class IngestDetectTest {
         NeedsAi pageOne = run(pdf, options(), null).needsAi().orElseThrow().items().get(0);
 
         IngestDetect.Result r = run(pdf, options(), answers(Map.of(pageOne.id(),
-                "Xpert Xpress CoV-2 plus\nInstructions for Use\nFor Use with GeneXpert Dx System")));
+                "February 6, 2026\nRe: K251543\nDear Kelly Scuderi:\nWe have reviewed your section 510(k)")));
 
         assertThat(r.report().details()).containsEntry("kind", "NOT_DEX").containsEntry("pages", 40);
         assertThat(r.needsAi()).isEmpty();
         assertThat(dir.resolve("out/pages/page-002.png")).doesNotExist();
+    }
+
+    @Test
+    void aScannedIfuUnlocksTheRemainingPagesLikeADecisionSummary() throws IOException {
+        Path pdf = dir.resolve("scan.pdf");
+        DexTexts.writeBlankPdf(pdf, 3);
+        NeedsAi pageOne = run(pdf, options(), null).needsAi().orElseThrow().items().get(0);
+
+        IngestDetect.Result r = run(pdf, options(), answers(Map.of(pageOne.id(),
+                "Xpert Xpress CoV-2 plus\nInstructions for Use\nFor Use with GeneXpert Dx System")));
+
+        assertThat(r.needsAi().orElseThrow().items()).extracting(NeedsAi::target)
+                .containsExactly("page-002", "page-003");
     }
 
     @Test

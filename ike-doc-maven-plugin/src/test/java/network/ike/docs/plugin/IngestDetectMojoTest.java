@@ -135,7 +135,7 @@ class IngestDetectMojoTest {
 
         Map<String, Object> entry = new LinkedHashMap<>();
         entry.put("id", item.id());
-        entry.put("value", "Xpert Xpress CoV-2 plus\nInstructions for Use\nFor Use with GeneXpert Dx System");
+        entry.put("value", "February 6, 2026\nRe: K251543\nDear Kelly Scuderi:\nWe have reviewed your section 510(k)");
         List<Map<String, Object>> list = new ArrayList<>();
         list.add(entry);
         Files.writeString(dir.resolve("out/answers.yaml"), IngestYaml.dump(Map.of("answers", list)));
@@ -144,7 +144,7 @@ class IngestDetectMojoTest {
 
         assertThat(needsAi).doesNotExist();
         assertThat(dir.resolve("out/detect.yaml")).content().contains("kind: NOT_DEX")
-                .contains("guess: manufacturer-ifu");
+                .contains("guess: fda-clearance-letter");
     }
 
     @Test

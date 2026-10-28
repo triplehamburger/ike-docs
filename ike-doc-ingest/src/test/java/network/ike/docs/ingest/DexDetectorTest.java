@@ -118,16 +118,40 @@ class DexDetectorTest {
     @Test
     void sourcesThatAreNotDecisionSummariesAreGuessedAndNeverAnError() {
         String letter = "February 6, 2026\nRe: K251543\nDear Kelly Scuderi:\nWe have reviewed your section 510(k)";
-        String gudid = "AccessGUDID - DEVICE: GeneXpert\nDEVICE IDENTIFIER (DI) INFORMATION";
-        String ifu = "Xpert Xpress CoV-2 plus\nInstructions for Use\nFor Use with GeneXpert Dx System";
 
         assertThat(detect(List.of(letter)).guess()).isEqualTo("fda-clearance-letter");
-        assertThat(detect(List.of(gudid)).guess()).isEqualTo("gudid-record");
-        assertThat(detect(List.of(ifu)).guess()).isEqualTo("manufacturer-ifu");
         assertThat(detect(List.of("Some other document with enough words to not be sparse. ".repeat(10))).guess())
                 .isEqualTo("unknown");
         assertThat(detect(List.of(letter)).kind()).isEqualTo(DexDetector.Kind.NOT_DEX);
         assertThat(detect(List.of(letter)).findings()).noneMatch(Finding::isError);
+    }
+
+    @Test
+    void aGudidRecordAndAnIfuAreAlwaysDexCompanionDocuments() {
+        String gudid = "AccessGUDID - DEVICE: GeneXpert\nDEVICE IDENTIFIER (DI) INFORMATION\nPrimary DI Number: 07332940008581";
+        String ifu = "Xpert Xpress CoV-2 plus\nInstructions for Use\nFor Use with GeneXpert Dx System";
+
+        DexDetector.Detection g = detect(List.of(gudid));
+        DexDetector.Detection i = detect(List.of(ifu));
+
+        assertThat(g.kind()).isEqualTo(DexDetector.Kind.DEX_GUDID);
+        assertThat(g.guess()).isEqualTo("gudid-record");
+        assertThat(i.kind()).isEqualTo(DexDetector.Kind.DEX_IFU);
+        assertThat(i.guess()).isEqualTo("manufacturer-ifu");
+        assertThat(g.findings()).extracting(Finding::check).contains("companion-document");
+        assertThat(g.findings()).noneMatch(Finding::isError);
+        assertThat(DexDetector.isCompanion(gudid)).isTrue();
+        assertThat(DexDetector.isCompanion(ifu)).isTrue();
+        assertThat(DexDetector.isCompanion("Re: K251543 Dear Kelly Instructions for Use")).isFalse();
+        assertThat(DexDetector.deviceIdentifier(gudid)).isEqualTo("07332940008581");
+        assertThat(DexDetector.deviceIdentifier(ifu)).isEmpty();
+    }
+
+    @Test
+    void aClearanceLetterThatMentionsInstructionsForUseIsStillNotDex() {
+        String letter = "February 6, 2026\nRe: K251543\nDear Kelly Scuderi:\nSee the Instructions for Use enclosed.";
+
+        assertThat(detect(List.of(letter)).kind()).isEqualTo(DexDetector.Kind.NOT_DEX);
     }
 
     @Test

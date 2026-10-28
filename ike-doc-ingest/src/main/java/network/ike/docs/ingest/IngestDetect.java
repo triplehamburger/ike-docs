@@ -135,16 +135,28 @@ public final class IngestDetect {
                 "name", s.name(), "page", s.page(), "found", s.found())).toList());
         details.put("sections", detection.sections().stream().map(s -> orderedMap(
                 "label", s.label(), "title", s.title(), "page", s.page())).toList());
+        boolean dex = detection.kind() != DexDetector.Kind.NOT_DEX;
+        if (dex) {
+            details.put("domain", "dex");
+        }
         if (detection.kind() == DexDetector.Kind.DEX_510K) {
             details.put("k-number", detection.kNumber());
             describeProvenance(detection.kNumber(), name, options, details, findings);
-            if (scanned) {
-                findings.add(Finding.warning("transcribed-source", name,
-                        "the pages were transcribed by AI from a scan, so topics built from them must be "
-                                + "marked draft and verified against the source"));
+        } else if (dex) {
+            details.put("companion", detection.guess());
+            if (detection.kind() == DexDetector.Kind.DEX_GUDID) {
+                String di = DexDetector.deviceIdentifier(texts.get(0));
+                if (!di.isEmpty()) {
+                    details.put("di-number", di);
+                }
             }
         } else {
             details.put("guess", detection.guess());
+        }
+        if (dex && scanned) {
+            findings.add(Finding.warning("transcribed-source", name,
+                    "the pages were transcribed by AI from a scan, so topics built from them must be "
+                            + "marked draft and verified against the source"));
         }
         return finish(sources, details, findings, detection.kind().name(), open);
     }
@@ -191,7 +203,8 @@ public final class IngestDetect {
             return new Scan(null, List.of(), true);
         }
         String firstText = Answers.resolve(List.of(first), answersYaml, CHECKS).accepted().get(first.id());
-        boolean dex = firstText != null && DexDetector.hasAllSignals(firstText);
+        boolean dex = firstText != null
+                && (DexDetector.hasAllSignals(firstText) || DexDetector.isCompanion(firstText));
 
         List<NeedsAi> items = new ArrayList<>(List.of(first));
         if (dex) {

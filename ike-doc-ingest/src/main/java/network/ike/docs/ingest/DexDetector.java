@@ -28,6 +28,10 @@ public final class DexDetector {
     public enum Kind {
         /// A 510(k) decision summary.
         DEX_510K,
+        /// An AccessGUDID device record: a companion document, always ingested into the dex domain.
+        DEX_GUDID,
+        /// A manufacturer's instructions for use: a companion document, always ingested into the dex domain.
+        DEX_IFU,
         /// Anything else.
         NOT_DEX
     }
@@ -167,10 +171,39 @@ public final class DexDetector {
         return new Detection(Kind.DEX_510K, layout, template, kNumber, "", signals, sections, findings);
     }
 
+    /// Whether page 1 is a companion of a decision summary: an AccessGUDID device
+    /// record or a manufacturer's instructions for use. Both are always
+    /// ingested into the dex domain.
+    ///
+    /// @param firstPage the text of page 1
+    /// @return true for a GUDID record or an IFU
+    public static boolean isCompanion(String firstPage) {
+        String guess = guess(collapse(firstPage));
+        return guess.equals(GUDID) || guess.equals(IFU);
+    }
+
+    /// The primary device identifier printed on an AccessGUDID record.
+    ///
+    /// @param firstPage the text of page 1
+    /// @return the 14-digit identifier, or empty if page 1 prints none
+    public static String deviceIdentifier(String firstPage) {
+        Matcher m = Pattern.compile("Primary\\s+DI\\s+Number:\\s*(\\d{14})").matcher(collapse(firstPage));
+        return m.find() ? m.group(1) : "";
+    }
+
     private static Detection notDex(String first, List<String> pages, String source, List<Signal> signals,
                                     List<Finding> findings) {
         List<String> found = signals.stream().filter(Signal::found).map(Signal::name).toList();
         List<String> missing = signals.stream().filter(s -> !s.found()).map(Signal::name).toList();
+        if (found.isEmpty() && isCompanion(first)) {
+            String guess = guess(first);
+            findings.add(Finding.info("companion-document", source,
+                    "a " + (guess.equals(GUDID) ? "GUDID record" : "manufacturer IFU")
+                            + " is a companion of a decision summary and is ingested into the dex domain; "
+                            + "confirm its license and handling at the confirmation step"));
+            Kind kind = guess.equals(GUDID) ? Kind.DEX_GUDID : Kind.DEX_IFU;
+            return new Detection(kind, Layout.UNKNOWN, "UNKNOWN", "", guess, signals, List.of(), findings);
+        }
         if (!found.isEmpty()) {
             findings.add(Finding.warning("partial-signals", source,
                     "page 1 has " + found + " but not " + missing + "; if this is a decision summary the text "
@@ -200,13 +233,16 @@ public final class DexDetector {
             return "fda-clearance-letter";
         }
         if (firstPage.contains("AccessGUDID")) {
-            return "gudid-record";
+            return GUDID;
         }
         if (Pattern.compile("Instructions\\s+for\\s+Use", Pattern.CASE_INSENSITIVE).matcher(firstPage).find()) {
-            return "manufacturer-ifu";
+            return IFU;
         }
         return "unknown";
     }
+
+    private static final String GUDID = "gudid-record";
+    private static final String IFU = "manufacturer-ifu";
 
     private static String template(String firstPage) {
         if (Pattern.compile("ASSAY\\s+AND\\s+INSTRUMENT\\s+COMBINATION\\s+TEMPLATE", Pattern.CASE_INSENSITIVE)
