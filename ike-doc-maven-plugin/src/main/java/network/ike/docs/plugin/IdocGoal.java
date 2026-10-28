@@ -45,6 +45,11 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest-detect} — classify a source PDF as a 510(k) decision summary or not. */
+    INGEST_DETECT("ingest-detect", IngestDetectMojo.class,
+            "Classify a source PDF as an FDA 510(k) decision summary (layout, "
+                    + "template, K-number) or not, and run the AI transcription "
+                    + "fallback for scanned PDFs. Writes detect.yaml and needs-ai.yaml."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="
