@@ -121,6 +121,34 @@ class IngestDetectMojoTest {
     }
 
     @Test
+    void aDirectorySourceDetectsEachPdfIntoItsOwnFolderAndNamesTheFailures() throws Exception {
+        Path in = Files.createDirectories(dir.resolve("in"));
+        writePdf(in.resolve("K162200.pdf"), assayOnlyText());
+        Files.writeString(in.resolve("broken.pdf"), "not a pdf");
+        Files.writeString(in.resolve("notes.txt"), "ignored");
+
+        assertThatThrownBy(() -> mojo(in).execute())
+                .isInstanceOf(MojoException.class).hasMessageContaining("1 of 2").hasMessageContaining("broken.pdf");
+
+        assertThat(dir.resolve("out/K162200/detect.yaml")).content().contains("kind: DEX_510K");
+        assertThat(dir.resolve("out/broken/detect.yaml")).exists();
+        assertThat(dir.resolve("out/notes")).doesNotExist();
+    }
+
+    @Test
+    void aDirectoryWithNoPdfsOrWithAnAnswersFileIsRejected() throws Exception {
+        Path in = Files.createDirectories(dir.resolve("in"));
+
+        assertThatThrownBy(() -> mojo(in).execute())
+                .isInstanceOf(MojoException.class).hasMessageContaining("no .pdf files");
+
+        IngestDetectMojo withAnswers = mojo(in);
+        withAnswers.answers = dir.resolve("answers.yaml").toFile();
+        assertThatThrownBy(withAnswers::execute)
+                .isInstanceOf(MojoException.class).hasMessageContaining("ike.ingest.answers");
+    }
+
+    @Test
     void aScannedPdfWritesAWorkOrderAndAnImageAndAFinishedAnswerClearsIt() throws Exception {
         Path pdf = dir.resolve("scan.pdf");
         writeBlankPdf(pdf, 2);
