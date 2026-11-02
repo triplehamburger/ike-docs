@@ -57,9 +57,9 @@ public enum IdocGoal implements GoalRef {
                     + "fallback for scanned PDFs. Writes detect.yaml and needs-ai.yaml."),
     /** {@code idoc:ingest-fragments} — split a converted decision summary into fragments and an assembly. */
     INGEST_FRAGMENTS("ingest-fragments", IngestFragmentsMojo.class,
-            "Split the single AsciiDoc file of a 510(k) decision summary into one "
-                    + "fragment per section, with generated header blocks and ids, and "
-                    + "build the record as an assembly that includes them. Writes "
+            "Split the single AsciiDoc file of a 510(k) decision summary, IFU or "
+                    + "GUDID record into fragments, with generated header blocks and ids, "
+                    + "and build the record as an assembly that includes them. Writes "
                     + "fragments.yaml."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,

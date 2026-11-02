@@ -12,17 +12,19 @@ import java.io.IOException;
 import java.nio.file.Path;
 
 /**
- * Split the single AsciiDoc file of a 510(k) decision summary into one
- * fragment per top-level section, and build the record as an assembly that
- * includes them in order. Writes {@code topics/dex/*.adoc}, the assembly
- * {@code assembly/DeXRecord_K######.adoc} and {@code fragments.yaml}.
+ * Split the single AsciiDoc file of a 510(k) decision summary, IFU or GUDID
+ * record into fragments, and build the record as an assembly that includes
+ * them in order. Writes {@code topics/dex/*.adoc}, the assembly under
+ * {@code assembly/} and {@code fragments.yaml}.
  *
  * <p>Each fragment is verbatim source text with a generated header block and
- * the id {@code dex-{k-number}-{slug}}. A section over {@code ike.fragments.sizeLimit}
- * is split at its lettered subsections, and a subsection still over the limit
- * at its top-level numbered studies. The goal fails, and writes no fragment,
- * when the 510(k) number or the sections cannot be found, when two headings
- * give the same id, or when the split would change any word.
+ * the id {@code dex-{document}-{slug}}, where the document is the 510(k)
+ * number, the GUDID primary DI number, {@code ike.fragments.documentId} or the
+ * title. A section over {@code ike.fragments.sizeLimit} is split at its
+ * lettered subsections, and a subsection still over the limit at its
+ * top-level numbered studies. The goal fails, and writes no fragment, when no
+ * document id or sections can be found, when a heading sits above the split
+ * level, or when the split would change any word.
  *
  * <p>Typical use:
  *
@@ -50,9 +52,13 @@ public class IngestFragmentsMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.fragments.sourceUrl")
     String sourceUrl;
 
-    /** The heading level that starts a fragment: 2 for the converted layout, from 1 to 5. */
-    @Parameter(property = "ike.fragments.sectionLevel", defaultValue = "2")
+    /** The heading level that starts a fragment, from 1 to 5; 0 chooses the lowest level with two or more headings. */
+    @Parameter(property = "ike.fragments.sectionLevel", defaultValue = "0")
     int sectionLevel;
+
+    /** The id prefix for a document with no 510(k) number or device identifier; unset, it is built from the title. */
+    @Parameter(property = "ike.fragments.documentId")
+    String documentId;
 
     /** The character count above which a section is split at its subsections, then at its numbered studies. */
     @Parameter(property = "ike.fragments.sizeLimit", defaultValue = "5000")
@@ -70,7 +76,7 @@ public class IngestFragmentsMojo implements org.apache.maven.api.plugin.Mojo {
         Path out = outputDir.getAbsoluteFile().toPath();
         Path report = out.resolve("fragments.yaml");
         IngestFragments.Result result = IngestFragments.run(source.getAbsoluteFile().toPath(),
-                new IngestFragments.Options(sectionLevel, sourceUrl, sizeLimit, split));
+                new IngestFragments.Options(sectionLevel, sourceUrl, sizeLimit, split, documentId));
         try {
             if (!result.report().hasErrors()) {
                 for (IngestFragments.Fragment f : result.fragments()) {

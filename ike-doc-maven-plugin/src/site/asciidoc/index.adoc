@@ -112,8 +112,8 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   says, page by page. See xref:ingest-coverage[Ingest coverage] below.
 
 | `idoc:ingest-fragments`
-| Split the single AsciiDoc file of a 510(k) decision summary into one
-  fragment per section with generated headers and ids, and build the record
+| Split the single AsciiDoc file of a 510(k) decision summary, IFU or GUDID
+  record into fragments with generated headers and ids, and build the record
   as an assembly. See xref:ingest-fragments[Ingest fragments] below.
 
 | `idoc:adocstudio`
@@ -405,8 +405,8 @@ listed as warnings, which is how a dropped section shows.
 == Ingest fragments (`idoc:ingest-fragments`)
 
 `idoc:ingest-fragments` cuts the single AsciiDoc file of a 510(k) decision
-summary into one fragment per top-level section and builds the record as an
-assembly that includes them in order.
+summary (or an IFU, a GUDID record or another converted document) into
+fragments and builds the record as an assembly that includes them in order.
 
 [source,bash]
 ----
@@ -415,19 +415,30 @@ mvn idoc:ingest-fragments -Dike.fragments.source=K230440.adoc
 
 The goal writes, under `target/fragments`:
 
-* `topics/dex/{k-number}-{section-slug}.adoc`, one per section, verbatim
-  text with a generated header block, a literal anchor and the id
-  `dex-{k-number}-{section-slug}`;
-* `assembly/DeXRecord_{K-number}.adoc`, the source's title block followed by
-  an `include::` with `leveloffset=+1` for each fragment; and
+* `topics/dex/*.adoc`, one file per fragment: verbatim text with a generated
+  header block, a literal anchor and the id `dex-{document}-{slug}`;
+* `assembly/`, the source's title block followed by an `include::` for each
+  fragment; and
 * `fragments.yaml`, the report.
 
-The 510(k) number is read from section I A. Headings inside a fragment move up
-so the section heading is level 1. The goal fails, and writes no fragment, when
-the number or the sections cannot be found, when two headings give the same id,
-or when the split would change any word. A fragment over 5000 characters is kept
-whole and noted in its `:topic-notes:`. The summary, keywords and index terms
-are placeholders; who writes the real ones is not decided.
+A top-level section is one fragment. A section over `ike.fragments.sizeLimit`
+(5000 characters) is split at its lettered subsections, and a subsection still
+over the limit at its top-level numbered items; a small item merges into the
+one before it. A fragment that cannot be split further is kept whole and noted
+in its `:topic-notes:`.
+
+The `{document}` part of an id is the 510(k) number, the GUDID primary DI
+number, `ike.fragments.documentId`, or the document title, in that order. The
+heading level to split on is chosen from the headings unless
+`ike.fragments.sectionLevel` is set. A document with a title and no sections is
+one fragment. When every heading has one level (as Docling writes them), levels
+are inferred from the printed labels.
+
+The goal fails, and writes no fragment, when no document id or sections can be
+found, when a heading sits above the split level between sections, or when the
+split would change any word. A repeated id gets a numeric suffix and a warning.
+Documents other than a 510(k) carry an unconfirmed license. The summary,
+keywords and index terms are placeholders built from the heading.
 
 == Design rationale
 

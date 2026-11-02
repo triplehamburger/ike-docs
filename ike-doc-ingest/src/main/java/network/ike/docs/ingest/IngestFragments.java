@@ -48,16 +48,26 @@ public final class IngestFragments {
     /// Fragments under this many characters are reported, and a small study is merged into the one before.
     public static final int MIN_SIZE = 500;
 
-    /// The heading level that starts a fragment when none is given.
+    /// The heading level that starts a fragment for a 510(k) converted by the usual readers.
     public static final int DEFAULT_SECTION_LEVEL = 2;
+
+    /// Choose the section level from the headings.
+    public static final int AUTO_SECTION_LEVEL = 0;
+
+    /// The longest id prefix built from a document's title or a supplied id, so file names stay usable on Windows.
+    static final int MAX_DOCUMENT_ID = 32;
 
     private static final String LICENSE = "Public domain — US federal government work.";
     private static final String ACCESSDATA = "https://www.accessdata.fda.gov/cdrh_docs/reviews/";
     private static final Pattern K_NUMBER =
-            Pattern.compile("510\\(k\\)\\s+Number:?\\s*(K\\d{6})", Pattern.CASE_INSENSITIVE);
-    private static final Pattern HEADING = Pattern.compile("^(={1,6}) (\\S.*?)\\s*$");
+            Pattern.compile("510\\(k\\) Number:? ?(K\\d{6})", Pattern.CASE_INSENSITIVE);
+    private static final String UNCONFIRMED_LICENSE = "License not confirmed; internal use until it is.";
+    private static final Pattern GUDID_DI =
+            Pattern.compile("Primary DI Number:? ?(\\d{14})|DEVICE: [^()]{1,80}\\((\\d{14})\\)");
+    private static final Pattern LOCAL_IMAGE = Pattern.compile("image::?file:///");
+    private static final Pattern HEADING =Pattern.compile("^(={1,6}) (\\S.*?)\\s*$");
     private static final Pattern FENCE = Pattern.compile("^(-{4,}|\\.{4,}|\\+{4,}|/{4,}|={4,}|\\|={3,})\\s*$");
-    private static final Pattern LABEL = Pattern.compile("^([IVX]{1,4}|[A-Z])\\.?\\s+(\\S.*)$");
+    private static final Pattern LABEL = Pattern.compile("^([IVX]{1,4}|[A-Z]|\\d+(?:\\.\\d+)*)\\.?\\s+(\\S.*)$");
     private static final Pattern ITEM = Pattern.compile("^\\. (\\S.*?)\\s*$");
     private static final Pattern START_ATTR = Pattern.compile("^\\[start=\\d+\\]\\s*$");
     private static final Pattern QUALIFIER = Pattern.compile("\\s*\\([^)]*[\\s/][^)]*\\)");
@@ -68,21 +78,36 @@ public final class IngestFragments {
 
     /// Settings for a run.
     ///
-    /// @param sectionLevel the heading level that starts a fragment, from 1 to 5
-    /// @param sourceUrl    the citation URL to record, or null to derive it from the K-number
+    /// @param sectionLevel the heading level that starts a fragment, from 1 to 5, or 0 to choose the lowest level
+    ///                     with at least two headings
+    /// @param sourceUrl    the citation URL to record, or null to derive it
     /// @param sizeLimit    the character count above which a fragment is split, at least 1000
     /// @param split        whether to split an oversize fragment; false keeps one fragment per section
-    public record Options(int sectionLevel, String sourceUrl, int sizeLimit, boolean split) {
-        /// Treat a blank URL as absent.
+    /// @param documentId   the id prefix for a document with no 510(k) number or device identifier, or null to
+    ///                     build it from the title
+    public record Options(int sectionLevel, String sourceUrl, int sizeLimit, boolean split, String documentId) {
+        /// Treat a blank URL or document id as absent.
         public Options {
             sourceUrl = sourceUrl == null || sourceUrl.isBlank() ? null : sourceUrl.strip();
+            documentId = documentId == null || documentId.isBlank() ? null : documentId.strip();
         }
 
-        /// The default options: sections start at level 2, the URL is derived and oversize fragments are split.
+        /// Settings for a 510(k): the id prefix comes from the 510(k) number.
+        ///
+        /// @param sectionLevel the heading level that starts a fragment, from 1 to 5, or 0 to choose
+        /// @param sourceUrl    the citation URL to record, or null to derive it
+        /// @param sizeLimit    the character count above which a fragment is split, at least 1000
+        /// @param split        whether to split an oversize fragment
+        public Options(int sectionLevel, String sourceUrl, int sizeLimit, boolean split) {
+            this(sectionLevel, sourceUrl, sizeLimit, split, null);
+        }
+
+        /// The default options: the section level is chosen from the headings, the URL is derived and oversize
+        /// fragments are split.
         ///
         /// @return the default options
         public static Options defaults() {
-            return new Options(DEFAULT_SECTION_LEVEL, null, SIZE_LIMIT, true);
+            return new Options(AUTO_SECTION_LEVEL, null, SIZE_LIMIT, true, null);
         }
     }
 
@@ -136,9 +161,9 @@ public final class IngestFragments {
         Map<String, Object> details = new LinkedHashMap<>();
         List<IngestReport.Source> sources = new ArrayList<>();
 
-        if (options.sectionLevel() < 1 || options.sectionLevel() > 5) {
+        if (options.sectionLevel() < 0 || options.sectionLevel() > 5) {
             findings.add(Finding.error("section-level-invalid", "options",
-                    "the section level must be from 1 to 5, not " + options.sectionLevel()));
+                    "the section level must be from 1 to 5, or 0 to choose it, not " + options.sectionLevel()));
             return failed(sources, details, findings);
         }
         if (options.sizeLimit() < 1000) {
@@ -155,38 +180,52 @@ public final class IngestFragments {
             return failed(sources, details, findings);
         }
 
-        Matcher k = K_NUMBER.matcher(text);
-        if (!k.find()) {
-            findings.add(Finding.error("k-number-missing", name,
-                    "no '510(k) Number: K######' was found; the K-number comes from section I A"));
-            return failed(sources, details, findings);
-        }
-        String kNumber = k.group(1).toUpperCase(Locale.ROOT);
-        String kLower = kNumber.toLowerCase(Locale.ROOT);
-
-        List<String> lines = List.of(text.split("\n", -1));
+        List<String> lines = relevel(List.of(text.split("\n", -1)), name, findings);
         List<Heading> headings = headings(lines);
-        int level = options.sectionLevel();
-        List<Heading> sections = headings.stream().filter(h -> h.level() == level).toList();
+        final int chosen = options.sectionLevel() == AUTO_SECTION_LEVEL ? autoLevel(headings)
+                : options.sectionLevel();
+        List<Heading> sections = headings.stream().filter(h -> h.level() == chosen).toList();
+        int level = chosen;
+        boolean single = false;
+        if (sections.isEmpty() && options.sectionLevel() == AUTO_SECTION_LEVEL && !headings.isEmpty()) {
+            single = true;
+            sections = List.of(headings.get(0));
+            level = headings.get(0).level();
+            findings.add(Finding.info("single-fragment", name, "the document has no heading level with two or "
+                    + "more headings, so it is kept as one fragment under its title"));
+        }
         if (sections.isEmpty()) {
-            findings.add(Finding.error("no-sections", name, "no level-" + level + " headings were found to split on"));
+            findings.add(Finding.error("no-sections", name, chosen == 0
+                    ? "the document has no headings to split on"
+                    : "no level-" + chosen + " headings were found to split on"));
             return failed(sources, details, findings);
         }
 
-        String url = options.sourceUrl() == null ? ACCESSDATA + kNumber + ".pdf" : options.sourceUrl();
-        if (options.sourceUrl() == null) {
-            findings.add(Finding.warning("citation-url-derived", name,
-                    "the citation URL " + url + " was derived from the K-number and not checked; "
-                            + "pass -Dike.fragments.sourceUrl to set it"));
-        } else if (!url.startsWith("https://")) {
-            findings.add(Finding.error("citation-url-invalid", name, "the citation URL must start with https://"));
+        final int splitLevel = level;
+        final int firstLine = sections.get(0).line();
+        for (Heading h : headings) {
+            if (!single && h.line() > firstLine && h.level() < splitLevel) {
+                findings.add(Finding.error("heading-above-section-level", name + " line " + (h.line() + 1),
+                        "the heading \"" + h.title() + "\" is level " + h.level() + ", above the split level "
+                                + splitLevel + ", so its text would belong to no fragment; pass "
+                                + "-Dike.fragments.sectionLevel=" + h.level() + " or fix the headings"));
+            }
+        }
+        if (findings.stream().anyMatch(Finding::isError)) {
+            return failed(sources, details, findings);
+        }
+
+        Doc doc = identify(text, headings, options, name, findings);
+        if (doc == null) {
+            return failed(sources, details, findings);
         }
 
         String preamble = join(lines.subList(0, sections.get(0).line()));
         List<Draft> drafts = new ArrayList<>();
         StringBuilder assembly = new StringBuilder(preamble.replaceAll("\\n+$", "\n"));
         long ownWords = words(preamble).size();
-        Planner planner = new Planner(lines, headings, level, options, kLower, drafts, assembly, findings, name);
+        Planner planner = new Planner(lines, headings, level, options, doc.id(), drafts, assembly, findings, name,
+                single);
         for (int i = 0; i < sections.size(); i++) {
             ownWords += planner.section(i, sections.get(i));
         }
@@ -225,7 +264,7 @@ public final class IngestFragments {
             List<String> related = new ArrayList<>(bySection.get(d.sectionIndex()));
             related.remove(d.id());
             String file = d.id().substring("dex-".length()) + ".adoc";
-            String content = header(d, kNumber, url, oversize, related) + "\n[[" + d.id() + "]]\n" + wrap(d);
+            String content = header(d, doc, oversize, related) + "\n[[" + d.id() + "]]\n" + wrap(d);
             fragments.add(new Fragment(d.id(), file, d.title(), d.kind(), d.sectionTitle(), d.body().length(),
                     content));
             detailList.add(orderedMap("id", d.id(), "file", file, "kind", d.kind(), "title", d.title(),
@@ -235,13 +274,25 @@ public final class IngestFragments {
             findings.add(Finding.info("fragment-undersize", name, small.size() + " fragment(s) have under "
                     + MIN_SIZE + " characters and are kept as printed: " + String.join(", ", small)));
         }
+        long localImages = LOCAL_IMAGE.matcher(text).results().count();
+        if (localImages > 0) {
+            findings.add(Finding.warning("image-local-path", name, localImages + " image(s) are referenced by a "
+                    + "local file path (image:file:///...), which will not resolve on another machine; the "
+                    + "converter writes these for scans and Word files"));
+        }
         findings.add(Finding.warning("metadata-placeholder", name,
                 ":topic-summary:, :topic-keywords: and index terms are placeholders built from the heading; "
                         + "who writes the real ones is not decided"));
 
-        String assemblyName = "DeXRecord_" + kNumber + ".adoc";
-        details.put("k-number", kNumber);
-        details.put("citation-url", url);
+        String assemblyName = doc.assemblyName();
+        details.put("document-kind", doc.kind());
+        details.put("document-id", doc.id());
+        if (doc.kind().equals("510k")) {
+            details.put("k-number", doc.label());
+        }
+        if (doc.url() != null) {
+            details.put("citation-url", doc.url());
+        }
         details.put("section-level", level);
         details.put("size-limit", options.sizeLimit());
         details.put("source-words", sourceWords);
@@ -265,12 +316,14 @@ public final class IngestFragments {
         private final String source;
         private final Map<String, String> seen = new HashMap<>();
         long attrWords;
+        private final boolean single;
         private int sectionIndex;
         private String sectionTitle;
         private String sectionPart;
 
         Planner(List<String> lines, List<Heading> headings, int level, Options options, String kLower,
-                List<Draft> drafts, StringBuilder assembly, List<Finding> findings, String source) {
+                List<Draft> drafts, StringBuilder assembly, List<Finding> findings, String source, boolean single) {
+            this.single = single;
             this.lines = lines;
             this.headings = headings;
             this.level = level;
@@ -368,8 +421,9 @@ public final class IngestFragments {
         }
 
         private void whole(Heading heading, String kind, String slug, String body, int offset) {
-            String id = "dex-" + kLower + "-" + (kind.equals("section") ? shorten(slug, 60) : slug);
-            if (slug.isEmpty() || slug.endsWith("-") || slug.startsWith("-")) {
+            String id = single ? "dex-" + kLower
+                    : "dex-" + kLower + "-" + (kind.equals("section") ? shorten(slug, 60) : slug);
+            if (!single && (slug.isEmpty() || slug.endsWith("-") || slug.startsWith("-"))) {
                 findings.add(Finding.error("slug-empty", source + " line " + (heading.line() + 1),
                         "the heading \"" + heading.title() + "\" has no letters or digits to build an id from"));
                 return;
@@ -384,13 +438,18 @@ public final class IngestFragments {
             drafts.add(draft);
         }
 
+        /// The id, or the id with `-2`, `-3` ... when an earlier heading already gave it (a cut slug can collide).
         private String unique(String id, String title) {
-            String previous = seen.putIfAbsent(id, title);
-            if (previous != null) {
-                findings.add(Finding.error("id-duplicate", source,
-                        "the headings \"" + previous + "\" and \"" + title + "\" both give the id " + id));
+            String candidate = id;
+            for (int n = 2; seen.containsKey(candidate); n++) {
+                candidate = id + "-" + n;
             }
-            return id;
+            seen.put(candidate, title);
+            if (!candidate.equals(id)) {
+                findings.add(Finding.warning("id-suffixed", source, "the heading \"" + title + "\" gives the same id as \""
+                        + seen.get(id) + "\"; its id is " + candidate));
+            }
+            return candidate;
         }
 
         private int end(Heading heading) {
@@ -503,12 +562,171 @@ public final class IngestFragments {
         return "= " + d.title() + "\n\n// tag::body[]\n" + d.body() + "// end::body[]\n";
     }
 
-    private static String header(Draft d, String kNumber, String url, boolean oversize, List<String> related) {
+    /// What the splitter knows about the whole document.
+    ///
+    /// @param id           the id prefix after `dex-`
+    /// @param kind         `510k`, `gudid` or `document`
+    /// @param label        the 510(k) number, the device identifier, or the title
+    /// @param describe     how a summary names the source
+    /// @param keywords     fixed keywords placed before the heading's
+    /// @param citation     the full `:topic-citation:`
+    /// @param license      the `:topic-license:`
+    /// @param url          the citation URL, or null
+    /// @param assemblyName the file name of the assembly
+    private record Doc(String id, String kind, String label, String describe, String keywords, String citation,
+                       String license, String url, String assemblyName) {
+    }
+
+    /// Decide what the document is and build its id and citation; null when it cannot be identified.
+    private static Doc identify(String text, List<Heading> headings, Options options, String name,
+                                List<Finding> findings) {
+        String flat = text.replaceAll("[*_#|]", " ").replaceAll("\\s+", " ");
+        Matcher k = K_NUMBER.matcher(flat);
+        Matcher di = GUDID_DI.matcher(flat);
+        String title = headings.stream().filter(h -> h.level() == 1).map(Heading::title).findFirst().orElse(null);
+        String prefix = options.documentId() == null ? null : slug(options.documentId());
+        if (k.find()) {
+            String kNumber = k.group(1).toUpperCase(Locale.ROOT);
+            String url = citationUrl(options, ACCESSDATA + kNumber + ".pdf", name, findings);
+            if (url == null) {
+                return null;
+            }
+            return new Doc(prefix != null ? prefix : kNumber.toLowerCase(Locale.ROOT), "510k", kNumber,
+                    "the FDA 510(k) decision summary " + kNumber, "510(k), " + kNumber + ", substantial equivalence",
+                    "U.S. Food and Drug Administration, Center for Devices and Radiological Health. 510(k) "
+                            + "Substantial Equivalence Determination Decision Summary: " + kNumber + ". " + url,
+                    LICENSE, url, "DeXRecord_" + kNumber + ".adoc");
+        }
+        if (di.find()) {
+            String number = di.group(1) != null ? di.group(1) : di.group(2);
+            String url = citationUrl(options, "https://accessgudid.nlm.nih.gov/devices/" + number, name, findings);
+            if (url == null) {
+                return null;
+            }
+            licenseUnconfirmed(name, findings);
+            String id = prefix != null ? prefix : "gudid-" + number;
+            return new Doc(id, "gudid", number, "the AccessGUDID record for device " + number,
+                    "GUDID, " + number, "U.S. National Library of Medicine. AccessGUDID: device " + number + ". " + url,
+                    UNCONFIRMED_LICENSE, url, id + ".adoc");
+        }
+        String id = shorten(prefix != null ? prefix : title == null ? "" : slug(title), MAX_DOCUMENT_ID);
+        if (id.isEmpty()) {
+            findings.add(Finding.error("document-id-missing", name,
+                    "no 510(k) number or device identifier was found and the document has no title to build an "
+                            + "id from; pass -Dike.fragments.documentId"));
+            return null;
+        }
+        if (options.documentId() == null) {
+            findings.add(Finding.info("document-id-derived", name,
+                    "the id prefix " + id + " was built from the title \"" + title + "\"; pass "
+                            + "-Dike.fragments.documentId to set it"));
+        }
+        String label = title == null ? id : title;
+        String url = options.sourceUrl();
+        if (url != null && !url.startsWith("https://")) {
+            findings.add(Finding.error("citation-url-invalid", name, "the citation URL must start with https://"));
+            return null;
+        }
+        licenseUnconfirmed(name, findings);
+        return new Doc(id, "document", label, "the document \"" + label + "\"", id,
+                "Source document: " + label + "." + (url == null ? "" : " " + url),
+                UNCONFIRMED_LICENSE, url, id + ".adoc");
+    }
+
+    private static String citationUrl(Options options, String derived, String name, List<Finding> findings) {
+        if (options.sourceUrl() == null) {
+            findings.add(Finding.warning("citation-url-derived", name, "the citation URL " + derived
+                    + " was derived from the document's identifier and not checked; pass -Dike.fragments.sourceUrl "
+                    + "to set it"));
+            return derived;
+        }
+        if (!options.sourceUrl().startsWith("https://")) {
+            findings.add(Finding.error("citation-url-invalid", name, "the citation URL must start with https://"));
+            return null;
+        }
+        return options.sourceUrl();
+    }
+
+    private static void licenseUnconfirmed(String name, List<Finding> findings) {
+        findings.add(Finding.warning("license-unconfirmed", name,
+                "the license of this document is not known; :topic-license: says so until it is confirmed"));
+    }
+
+    /// When every heading below the title has one level (as Docling writes them), give each the level its printed
+    /// label implies: a Roman numeral keeps the level, a letter goes one deeper, a number two deeper. A heading
+    /// with no label (OCR often drops it) takes the level of the heading before it. Only the `=` marks change.
+    private static List<String> relevel(List<String> lines, String name, List<Finding> findings) {
+        List<Heading> all = headings(lines);
+        long titles = all.stream().filter(h -> h.level() == 1).count();
+        List<Heading> candidates = all.stream().filter(h -> !(h.level() == 1 && titles == 1)).toList();
+        if (candidates.size() < 3 || candidates.stream().map(Heading::level).distinct().count() != 1) {
+            return lines;
+        }
+        int base = candidates.get(0).level();
+        // A lone I, V or X is as likely a letter; Roman numerals count only if one of II, III, IV ... is present.
+        boolean roman = candidates.stream().anyMatch(h -> labelKind(h.title()) == 1
+                && !h.title().matches("^[IVX]\\.?\\s.*"));
+        int[] kinds = new int[4];
+        for (Heading h : candidates) {
+            int kind = labelKind(h.title());
+            kinds[kind == 1 && !roman ? 2 : kind]++;
+        }
+        int labelled = kinds[1] + kinds[2] + kinds[3];
+        int distinct = (kinds[1] > 0 ? 1 : 0) + (kinds[2] > 0 ? 1 : 0) + (kinds[3] > 0 ? 1 : 0);
+        if (distinct < 2 || labelled * 2 < candidates.size()) {
+            return lines;
+        }
+        List<String> out = new ArrayList<>(lines);
+        int previous = base;
+        int changed = 0;
+        for (Heading h : candidates) {
+            int kind = labelKind(h.title());
+            if (kind == 1 && !roman) {
+                kind = 2;
+            }
+            int level = kind == 0 ? previous : Math.min(5, base + kind - 1);
+            previous = level;
+            if (level != h.level()) {
+                out.set(h.line(), "=".repeat(level) + " " + h.title());
+                changed++;
+            }
+        }
+        findings.add(Finding.info("levels-inferred", name, "all " + candidates.size() + " headings had level " + base
+                + "; " + changed + " were moved to the level their printed label implies (Roman, letter, number)"));
+        return List.copyOf(out);
+    }
+
+    /// 1 for a Roman numeral label, 2 for a single letter, 3 for a number, 0 for no label.
+    private static int labelKind(String title) {
+        if (title.matches("^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII)\\.?\\s+\\S.*")) {
+            return 1;
+        }
+        if (title.matches("^[A-Z]\\.?\\s+\\S.*")) {
+            return 2;
+        }
+        if (title.matches("^\\d+(\\.\\d+)*\\.?\\s+\\S.*")) {
+            return 3;
+        }
+        return 0;
+    }
+
+    /// The lowest heading level that has at least two headings, or 0 if none does.
+    private static int autoLevel(List<Heading> headings) {
+        for (int level = 1; level <= 5; level++) {
+            final int l = level;
+            if (headings.stream().filter(h -> h.level() == l).count() >= 2) {
+                return level;
+            }
+        }
+        return 0;
+    }
+
+    private static String header(Draft d, Doc doc, boolean oversize, List<String> related) {
         String rest = stripLabel(d.title());
         String label = d.title().substring(0, d.title().length() - rest.length()).strip();
         String plain = rest.replaceAll("[:.]+$", "");
-        String notes = "DeX fragment, verbatim from the FDA decision summary " + kNumber
-                + ". Public domain US federal work."
+        String notes = "DeX fragment, verbatim from " + doc.describe() + "."
+                + (doc.kind().equals("510k") ? " Public domain US federal work." : "")
                 + (oversize ? " Kept whole as a reference exception per IKE-TOPIC-DECOMPOSITION." : "");
         return "// " + d.id() + "\n"
                 + "// Topic: " + d.title() + "\n"
@@ -517,16 +735,14 @@ public final class IngestFragments {
                 + ":topic-id: " + d.id() + "\n"
                 + ":topic-type: reference\n"
                 + ":topic-status: review\n"
-                + ":topic-keywords: 510(k), " + kNumber + ", substantial equivalence, "
-                + plain.toLowerCase(Locale.ROOT) + "\n"
+                + ":topic-keywords: " + doc.keywords() + ", " + plain.toLowerCase(Locale.ROOT) + "\n"
                 + ":topic-summary: " + (label.isEmpty() ? "Part" : "Part " + label) + " (" + plain
-                + ") of the FDA 510(k) decision summary " + kNumber + ", reproduced verbatim.\n"
+                + ") of " + doc.describe() + ", reproduced verbatim.\n"
                 + (related.isEmpty() ? "" : ":topic-related: " + String.join(", ", related) + "\n")
                 + ":topic-notes: " + notes + "\n"
                 + ":topic-provenance: external\n"
-                + ":topic-citation: U.S. Food and Drug Administration, Center for Devices and Radiological Health. "
-                + "510(k) Substantial Equivalence Determination Decision Summary: " + kNumber + ". " + url + "\n"
-                + ":topic-license: " + LICENSE + "\n";
+                + ":topic-citation: " + doc.citation() + "\n"
+                + ":topic-license: " + doc.license() + "\n";
     }
 
     /// The heading with its printed label (a Roman numeral or a letter) removed.
