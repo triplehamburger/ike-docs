@@ -198,12 +198,143 @@ class IngestFragmentsTest {
     }
 
     @Test
-    void aMissingKNumberIsAnError() throws Exception {
-        IngestFragments.Result r = IngestFragments.run(write("k.adoc", "= T\n\n== I One\n\ntext\n"),
+    void aDocumentWithNoNumberTakesItsIdFromTheTitleAndItsLicenseIsUnconfirmed() throws Exception {
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc",
+                "= Acme Respiratory Panel IFU\n\n== 1 Intended Use\n\ntext\n\n== 2 Procedure\n\nmore\n"),
                 IngestFragments.Options.defaults());
 
-        assertThat(checks(r)).isEqualTo("k-number-missing");
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(checks(r)).contains("document-id-derived").contains("license-unconfirmed");
+        assertThat(r.report().details()).containsEntry("document-kind", "document")
+                .containsEntry("document-id", "acme-respiratory-panel-ifu");
+        assertThat(r.fragments()).extracting(IngestFragments.Fragment::id).containsExactly(
+                "dex-acme-respiratory-panel-ifu-intended-use", "dex-acme-respiratory-panel-ifu-procedure");
+        assertThat(r.fragments().get(0).content()).contains(":topic-license: License not confirmed")
+                .contains("Source document: Acme Respiratory Panel IFU.");
+        assertThat(r.assemblyName()).isEqualTo("acme-respiratory-panel-ifu.adoc");
+    }
+
+    @Test
+    void headingsAllAtOneLevelAreMovedToTheLevelTheirLabelsImply() throws Exception {
+        String text = "= Title\n\n510(k) Number: K555555\n\n"
+                + "== I Background Information:\n\nintro\n\n== A Applicant\n\nAcme\n\n== Names\n\nPanel\n\n"
+                + "== II Performance:\n\n== B Study\n\nbody\n\n== 1 Detail\n\nmore\n";
+
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", text), IngestFragments.Options.defaults());
+
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(checks(r)).contains("levels-inferred");
+        assertThat(r.fragments()).extracting(IngestFragments.Fragment::id).containsExactly(
+                "dex-k555555-background-information", "dex-k555555-performance");
+        assertThat(r.fragments().get(0).content()).contains("\n= I Background Information:\n")
+                .contains("\n== A Applicant\n").contains("\n== Names\n");
+        assertThat(r.fragments().get(1).content()).contains("\n== B Study\n").contains("\n=== 1 Detail\n");
+    }
+
+    @Test
+    void aLoneRomanOneAmongLetteredHeadingsIsALetter() throws Exception {
+        StringBuilder text = new StringBuilder("= Title\n\n510(k) Number: K444444\n\n");
+        for (char c = 'A'; c <= 'L'; c++) {
+            text.append("== ").append(c).append(". Heading ").append(c).append(":\n\nbody ").append(c).append("\n\n");
+        }
+
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", text.toString()),
+                IngestFragments.Options.defaults());
+
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(checks(r)).doesNotContain("levels-inferred");
+        assertThat(r.fragments()).hasSize(12);
+    }
+
+    @Test
+    void aHeadingAboveTheSplitLevelBetweenSectionsIsAnError() throws Exception {
+        String text = "510(k) Number: K111111\n\n= Title\n\n=== A One\n\ntext\n\n== B Two\n\ntext\n\n=== C Three\n\nmore\n";
+
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", text), IngestFragments.Options.defaults());
+
+        assertThat(checks(r)).isEqualTo("heading-above-section-level");
+        assertThat(r.report().findings().get(0).message()).contains("sectionLevel=2");
+    }
+
+    @Test
+    void aLongTitleGivesAShortIdPrefix() throws Exception {
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc",
+                "= Xpert Xpress CoV-2 plus ENGLISH Package Insert 303-0272 Rev A1_3\n\n== One\n\na\n\n== Two\n\nb\n"),
+                IngestFragments.Options.defaults());
+
+        assertThat(r.report().details()).containsEntry("document-id", "xpert-xpress-cov-2-plus-english");
+        assertThat(r.fragments().get(0).id()).isEqualTo("dex-xpert-xpress-cov-2-plus-english-one");
+    }
+
+    @Test
+    void aSuppliedDocumentIdOverridesTheTitle() throws Exception {
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", "= T\n\n== One\n\na\n\n== Two\n\nb\n"),
+                new IngestFragments.Options(0, null, 5000, true, "xpert-ifu"));
+
+        assertThat(checks(r)).doesNotContain("document-id-derived");
+        assertThat(r.fragments()).extracting(IngestFragments.Fragment::id).containsExactly(
+                "dex-xpert-ifu-one", "dex-xpert-ifu-two");
+    }
+
+    @Test
+    void aGudidRecordTakesItsIdFromTheDeviceIdentifier() throws Exception {
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc",
+                "= AccessGUDID - DEVICE: Acme\n\n== Device Identifiers\n\nPrimary DI Number: 00812345678905\n\n"
+                        + "== Contacts\n\nPhone\n"), IngestFragments.Options.defaults());
+
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(r.report().details()).containsEntry("document-kind", "gudid")
+                .containsEntry("document-id", "gudid-00812345678905");
+        assertThat(r.fragments().get(0).content())
+                .contains("https://accessgudid.nlm.nih.gov/devices/00812345678905");
+        assertThat(checks(r)).contains("citation-url-derived").contains("license-unconfirmed");
+    }
+
+    @Test
+    void aDocumentWithOnlyATitleIsKeptAsOneFragment() throws Exception {
+        String text = "= AccessGUDID - DEVICE: Acme\n\n*Primary DI Number:*\n\n00812345678905\n\n*Brand Name:*\n\nAcme\n";
+
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", text), IngestFragments.Options.defaults());
+
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(checks(r)).contains("single-fragment");
+        assertThat(r.fragments()).extracting(IngestFragments.Fragment::id).containsExactly("dex-gudid-00812345678905");
+        assertThat(r.fragments().get(0).content()).contains("\n[[dex-gudid-00812345678905]]\n= AccessGUDID - DEVICE: Acme\n");
+        assertThat(r.assembly()).contains("include::{topics}/topics/dex/gudid-00812345678905.adoc[leveloffset=+0]");
+    }
+
+    @Test
+    void aScannedGudidRecordTakesItsIdentifierFromTheDeviceHeading() throws Exception {
+        String text = "= scan\n\nimage:file:///C:/tmp/a.png[]\n\n== DEVICE: GeneXperte (07332940008581)\n\ntext\n\n"
+                + "== DEVICE IDENTIFIER (DI) INFORMATION\n\nmore\n";
+
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", text), IngestFragments.Options.defaults());
+
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(r.report().details()).containsEntry("document-id", "gudid-07332940008581");
+        assertThat(checks(r)).contains("image-local-path");
+    }
+
+    @Test
+    void noNumberAndNoTitleIsAnError() throws Exception {
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", "== One\n\na\n\n== Two\n\nb\n"),
+                IngestFragments.Options.defaults());
+
+        assertThat(checks(r)).isEqualTo("document-id-missing");
         assertThat(r.fragments()).isEmpty();
+    }
+
+    @Test
+    void theSectionLevelIsChosenFromTheHeadingsWhenNotGiven() throws Exception {
+        IngestFragments.Result flat = IngestFragments.run(write("flat.adoc",
+                "510(k) Number: K111111\n\n= One\n\na\n\n= Two\n\nb\n"), IngestFragments.Options.defaults());
+        IngestFragments.Result deeper = IngestFragments.run(write("deep.adoc",
+                "510(k) Number: K111111\n\n= Title\n\n== One\n\na\n\n== Two\n\nb\n"), IngestFragments.Options.defaults());
+
+        assertThat(flat.report().details()).containsEntry("section-level", 1);
+        assertThat(deeper.report().details()).containsEntry("section-level", 2);
+        assertThat(flat.fragments()).hasSize(2);
+        assertThat(flat.assembly()).contains("[leveloffset=+0]");
     }
 
     @Test
@@ -215,13 +346,16 @@ class IngestFragmentsTest {
     }
 
     @Test
-    void twoHeadingsThatGiveTheSameIdAreAnError() throws Exception {
-        String text = "510(k) Number: K111111\n\n== I Study:\n\na\n\n== II Study\n\nb\n";
+    void twoHeadingsThatGiveTheSameIdGetANumberedSuffixAndAWarning() throws Exception {
+        String text = "510(k) Number: K111111\n\n== I Study:\n\na\n\n== II Study\n\nb\n\n== III Study.\n\nc\n";
 
         IngestFragments.Result r = IngestFragments.run(write("k.adoc", text), IngestFragments.Options.defaults());
 
-        assertThat(checks(r)).contains("id-duplicate");
-        assertThat(r.fragments()).isEmpty();
+        assertThat(r.report().hasErrors()).as(checks(r)).isFalse();
+        assertThat(checks(r)).contains("id-suffixed");
+        assertThat(r.fragments()).extracting(IngestFragments.Fragment::id).containsExactly(
+                "dex-k111111-study", "dex-k111111-study-2", "dex-k111111-study-3");
+        assertThat(r.fragments().get(1).fileName()).isEqualTo("k111111-study-2.adoc");
     }
 
     @Test
