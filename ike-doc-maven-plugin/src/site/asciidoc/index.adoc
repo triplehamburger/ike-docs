@@ -111,6 +111,11 @@ existence in `ike-parent`'s `doc-pipeline` profile.
 | Check that the topics written from a source PDF still hold what the PDF
   says, page by page. See xref:ingest-coverage[Ingest coverage] below.
 
+| `idoc:ingest-fragments`
+| Split the single AsciiDoc file of a 510(k) decision summary into one
+  fragment per section with generated headers and ids, and build the record
+  as an assembly. See xref:ingest-fragments[Ingest fragments] below.
+
 | `idoc:adocstudio`
 | Generate Adoc Studio sidecar projects for assembly modules.
 
@@ -395,6 +400,34 @@ The goal writes `target/ingest/coverage.yaml` and fails when:
 
 Pages where less than 60% of the distinct words are in the topics are
 listed as warnings, which is how a dropped section shows.
+
+[[ingest-fragments]]
+== Ingest fragments (`idoc:ingest-fragments`)
+
+`idoc:ingest-fragments` cuts the single AsciiDoc file of a 510(k) decision
+summary into one fragment per top-level section and builds the record as an
+assembly that includes them in order.
+
+[source,bash]
+----
+mvn idoc:ingest-fragments -Dike.fragments.source=K230440.adoc
+----
+
+The goal writes, under `target/fragments`:
+
+* `topics/dex/{k-number}-{section-slug}.adoc`, one per section, verbatim
+  text with a generated header block, a literal anchor and the id
+  `dex-{k-number}-{section-slug}`;
+* `assembly/DeXRecord_{K-number}.adoc`, the source's title block followed by
+  an `include::` with `leveloffset=+1` for each fragment; and
+* `fragments.yaml`, the report.
+
+The 510(k) number is read from section I A. Headings inside a fragment move up
+so the section heading is level 1. The goal fails, and writes no fragment, when
+the number or the sections cannot be found, when two headings give the same id,
+or when the split would change any word. A fragment over 5000 characters is kept
+whole and noted in its `:topic-notes:`. The summary, keywords and index terms
+are placeholders; who writes the real ones is not decided.
 
 == Design rationale
 

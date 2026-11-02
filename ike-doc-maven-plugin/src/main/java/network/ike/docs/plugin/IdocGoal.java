@@ -50,6 +50,12 @@ public enum IdocGoal implements GoalRef {
             "Compare a source PDF's words with the topics written from it, "
                     + "page by page, and check each decision-summary section "
                     + "title appears. Writes coverage.yaml."),
+    /** {@code idoc:ingest-fragments} — split a converted decision summary into fragments and an assembly. */
+    INGEST_FRAGMENTS("ingest-fragments", IngestFragmentsMojo.class,
+            "Split the single AsciiDoc file of a 510(k) decision summary into one "
+                    + "fragment per section, with generated header blocks and ids, and "
+                    + "build the record as an assembly that includes them. Writes "
+                    + "fragments.yaml."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="
