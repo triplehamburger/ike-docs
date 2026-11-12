@@ -440,6 +440,14 @@ split would change any word. A repeated id gets a numeric suffix and a warning.
 Documents other than a 510(k) carry an unconfirmed license. The summary,
 keywords and index terms are placeholders built from the heading.
 
+The goal also checks each fragment id against the topics already under
+`ike.fragments.existingRoots` (default: the module's `src/docs/asciidoc`).
+A fragment whose id is declared by a file with a different name fails the goal
+with a `duplicate-id` error, because placing it would give two files one id. A
+fragment whose id and file name match an existing topic replaces it, and the
+report notes how many do. A root that does not exist is skipped with a note;
+set the property to blank to turn the check off.
+
 == Design rationale
 
 [[_design_rationale]]
