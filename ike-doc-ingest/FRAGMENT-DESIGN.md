@@ -24,8 +24,9 @@ The fragments follow `IKE-ASCIIDOC-FRAGMENT.md`: a comment header, a `:topic-*:`
 - **Headers.** Type `reference`, status `review`, provenance `external`. A 510(k) is recorded as public domain; any other document carries an unconfirmed license and a warning. `:topic-related:` links the fragments of the same top-level section. The summary and keywords are placeholders built from the heading.
 - **Assembly.** The source's title block, then each split heading with the text before its first part, then an `include::` for every fragment. A study fragment keeps its text between `tag::body[]` and `end::body[]`; the assembly includes only that region under a list item that repeats the study title, so the rendered record keeps the source's list.
 - **Safety net.** The words of the fragments plus the assembly must equal the words of the source, or the goal fails and writes nothing. A heading above the split level between sections is an error, because its text would belong to no fragment.
+- **Existing topics.** The plugin goal (not `IngestFragments`) checks each fragment id against the topics under `ike.fragments.existingRoots` (default `src/docs/asciidoc`). A different file with the same id is a `duplicate-id` error and nothing is written; the same file name replaces the topic and is counted in an `existing-topics-replaced` note. This catches a duplicate before placement, where `idoc:topic-registry` would only warn after it.
 
-Parameters: `ike.fragments.source`, `outputDir`, `sourceUrl`, `sectionLevel` (default 0, chosen from the headings), `documentId`, `sizeLimit` (default 5000), `split` (default true).
+Parameters: `ike.fragments.source`, `outputDir`, `sourceUrl`, `sectionLevel` (default 0, chosen from the headings), `documentId`, `sizeLimit` (default 5000), `split` (default true), `existingRoots` (default `src/docs/asciidoc`; blank turns the check off).
 
 ## Known limits
 
