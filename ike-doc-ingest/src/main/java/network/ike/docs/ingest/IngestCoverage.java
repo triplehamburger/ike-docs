@@ -57,6 +57,20 @@ public final class IngestCoverage {
     /// @param maxMissing the share of the PDF's words the topics may lack, from 0 to 1
     /// @return the report; an error finding means coverage is not good enough or could not be judged
     public static Result run(Path pdf, Path topicsDir, double maxMissing) {
+        return run(pdf, topicsDir, null, maxMissing);
+    }
+
+    /// Compare a source PDF with the topics written from it, also reading the
+    /// assembly that includes them. A section split into several topics keeps
+    /// its own heading in the assembly, so section titles are looked for there
+    /// as well; the assembly is not counted in the word comparison.
+    ///
+    /// @param pdf         the source PDF; it must have a text layer
+    /// @param topicsDir   the folder holding the topic `.adoc` files, searched recursively
+    /// @param assemblyDir the folder holding the assembly `.adoc` files, or null for none
+    /// @param maxMissing  the share of the PDF's words the topics may lack, from 0 to 1
+    /// @return the report; an error finding means coverage is not good enough or could not be judged
+    public static Result run(Path pdf, Path topicsDir, Path assemblyDir, double maxMissing) {
         String name = pdf.getFileName() == null ? pdf.toString() : pdf.getFileName().toString();
         List<Finding> findings = new ArrayList<>();
         Map<String, Object> details = new LinkedHashMap<>();
@@ -145,7 +159,22 @@ public final class IngestCoverage {
             findings.add(Finding.warning("coverage-page", name,
                     (weak.size() - MAX_PAGE_FINDINGS) + " more weak page(s) not listed"));
         }
-        checkSections(pdf, String.join(" ", topicWords), details, findings);
+        List<String> titleWords = new ArrayList<>(topicWords);
+        if (assemblyDir != null) {
+            List<Finding> assemblyFindings = new ArrayList<>();
+            for (Path file : topicFiles(assemblyDir, assemblyFindings)) {
+                try {
+                    titleWords.addAll(words(Files.readString(file, StandardCharsets.UTF_8)));
+                } catch (IOException e) {
+                    findings.add(Finding.error("topic-unreadable", file.toString(),
+                            "cannot read the assembly: " + e.getMessage()));
+                }
+            }
+            for (Finding f : assemblyFindings) {
+                findings.add(Finding.warning("assembly-unreadable", f.component(), f.message()));
+            }
+        }
+        checkSections(pdf, String.join(" ", titleWords), details, findings);
         return done(sources, details, findings);
     }
 
