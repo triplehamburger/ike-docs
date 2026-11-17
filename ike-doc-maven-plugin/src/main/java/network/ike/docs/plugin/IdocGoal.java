@@ -45,6 +45,10 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest} — run detect, fragments and coverage in order. */
+    INGEST("ingest", IngestMojo.class,
+            "Run idoc:ingest-detect, idoc:ingest-fragments and idoc:ingest-coverage "
+                    + "in order from one set of parameters; ike.ingest.only runs one step."),
     /** {@code idoc:ingest-coverage} — check that topics still hold what their source PDF says. */
     INGEST_COVERAGE("ingest-coverage", IngestCoverageMojo.class,
             "Compare a source PDF's words with the topics written from it, "
@@ -61,6 +65,12 @@ public enum IdocGoal implements GoalRef {
                     + "GUDID record into fragments, with generated header blocks and ids, "
                     + "and build the record as an assembly that includes them. Writes "
                     + "fragments.yaml."),
+    /** {@code idoc:ingest-place} — copy the fragments into a DeX project and register the assembly. */
+    INGEST_PLACE("ingest-place", IngestPlaceMojo.class,
+            "Place the output of idoc:ingest-fragments in a DeX project: copy the "
+                    + "topics into the topics module, create the assembly module and "
+                    + "register it in assemblies/pom.xml. Writes placed.yaml; "
+                    + "ike.place.dryRun=true writes nothing."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="

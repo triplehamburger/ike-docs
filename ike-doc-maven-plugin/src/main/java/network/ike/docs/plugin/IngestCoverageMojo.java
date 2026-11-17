@@ -45,6 +45,15 @@ public class IngestCoverageMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.ingest.topics", required = true)
     File topics;
 
+    /**
+     * The folder holding the assembly {@code .adoc} files, searched recursively
+     * for section titles only. A section split into several topics keeps its
+     * heading in the assembly, so set this to the assembly written by
+     * {@code idoc:ingest-fragments}; unset, titles are looked for in the topics only.
+     */
+    @Parameter(property = "ike.ingest.assembly")
+    File assembly;
+
     /** The share of the PDF's words the topics may lack, from 0 to 1. */
     @Parameter(property = "ike.ingest.maxMissing", defaultValue = "0.10")
     double maxMissing;
@@ -61,7 +70,8 @@ public class IngestCoverageMojo implements org.apache.maven.api.plugin.Mojo {
         Path out = outputDir.getAbsoluteFile().toPath();
         Path report = out.resolve("coverage.yaml");
         IngestCoverage.Result result = IngestCoverage.run(source.getAbsoluteFile().toPath(),
-                topics.getAbsoluteFile().toPath(), maxMissing);
+                topics.getAbsoluteFile().toPath(),
+                assembly == null ? null : assembly.getAbsoluteFile().toPath(), maxMissing);
         try {
             IngestYaml.writeAtomic(report, IngestYaml.reportToYaml(result.report()));
         } catch (IOException e) {
