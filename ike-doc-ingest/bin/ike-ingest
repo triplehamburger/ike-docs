@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# ike-ingest: run the ingestion chain on one source PDF, or any one piece of it.
+#
+#   ike-ingest --pdf K230440.pdf [--only STEP] [options] [-- extra mvn args]
+#
+# Steps, in order (each is also reachable alone with --only):
+#   convert  PDF -> one AsciiDoc file     ike-convert, then ike-fidelity (a failed fidelity check only warns)
+#   split    AsciiDoc -> fragments        mvn idoc:ingest  (ike.ingest.only=fragments)
+#   check    fragments vs the PDF         mvn idoc:ingest  (ike.ingest.only=coverage)
+#   build    place, validate, render      idoc:ingest-place, idoc:topic-registry, mvn verify in --project (only when --project is given)
+#
+# Without --only every step runs, stopping at the first that fails.
+#
+# Options:
+#   --pdf FILE        the source PDF (required)
+#   --adoc FILE       the converted AsciiDoc (default: OUT/K-name.adoc; convert writes it there)
+#   --out DIR         where reports and fragments go (default: ./ingest-out)
+#   --project DIR     a dex project; enables the build step
+#   --assembly NAME   assembly module to create and build inside --project (default: the --pdf name)
+#   --only STEP       run one step: convert | split | check | build
+#   --no-fidelity     skip ike-fidelity after convert
+#   --strict-fidelity stop the run when ike-fidelity fails (default: print a warning and go on)
+#   -h, --help        this text
+#
+# Environment:
+#   IKE_CONVERT   converter command, may carry arguments   (default: ike-convert)
+#   IKE_FIDELITY  fidelity command, may carry arguments    (default: ike-fidelity)
+#   MVN           Maven command, may carry flags (default: mvn)
+#   IKE_DOC_PLUGIN  plugin coordinates      (default: network.ike.docs:ike-doc-maven-plugin; add :VERSION to pin)
+set -euo pipefail
+
+STEPS=(convert split check build)
+pdf="" adoc="" out="./ingest-out" project="" assembly="" only="" fidelity=1 strict=0
+IKE_CONVERT="${IKE_CONVERT:-ike-convert}"
+IKE_FIDELITY="${IKE_FIDELITY:-ike-fidelity}"
+MVN="${MVN:-mvn}"
+# the converter commands may carry arguments, e.g. "python utilities/document_to_asciidoc.py"
+read -r -a CONVERT_CMD <<< "$IKE_CONVERT"
+read -r -a FIDELITY_CMD <<< "$IKE_FIDELITY"
+read -r -a MVN_CMD <<< "$MVN"
+PLUGIN="${IKE_DOC_PLUGIN:-network.ike.docs:ike-doc-maven-plugin}"
+
+usage() { sed -n '2,/^set -euo/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'; }
+die() { echo "ike-ingest: $*" >&2; exit 2; }
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pdf) pdf="${2:?--pdf needs a file}"; shift 2 ;;
+    --adoc) adoc="${2:?--adoc needs a file}"; shift 2 ;;
+    --out) out="${2:?--out needs a directory}"; shift 2 ;;
+    --project) project="${2:?--project needs a directory}"; shift 2 ;;
+    --assembly) assembly="${2:?--assembly needs a name}"; shift 2 ;;
+    --only) only="${2:?--only needs a step}"; shift 2 ;;
+    --no-fidelity) fidelity=0; shift ;;
+    --strict-fidelity) strict=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --) shift; break ;;
+    *) die "unknown option $1 (see --help)" ;;
+  esac
+done
+extra=("$@")
+
+[ -n "$pdf" ] || die "--pdf is required (see --help)"
+[ -f "$pdf" ] || die "no such file: $pdf"
+if [ -n "$only" ]; then
+  case " ${STEPS[*]} " in *" $only "*) ;; *) die "--only must be one of: ${STEPS[*]}" ;; esac
+fi
+
+name="$(basename "$pdf")"; name="${name%.*}"
+mkdir -p "$out"
+[ -n "$adoc" ] || adoc="$out/$name.adoc"
+[ -n "$assembly" ] || assembly="$name"
+
+want() { [ -z "$only" ] && { [ "$1" != build ] || [ -n "$project" ]; } || [ "$only" = "$1" ]; }
+
+run_goal() { # run_goal STEP
+  "${MVN_CMD[@]}" -B "$PLUGIN:ingest" \
+    -Dike.ingest.source="$pdf" -Dike.ingest.adoc="$adoc" -Dike.ingest.outputDir="$out" \
+    -Dike.ingest.only="$1" "${extra[@]}"
+}
+
+if want convert; then
+  echo "== convert: $pdf -> $adoc"
+  "${CONVERT_CMD[@]}" "$pdf" -o "$adoc"
+  if [ "$fidelity" = 1 ]; then
+    echo "== fidelity: $pdf vs $adoc"
+    if ! PYTHONUTF8=1 "${FIDELITY_CMD[@]}" "$pdf" "$adoc"; then
+      [ "$strict" = 0 ] || die "fidelity check failed (--strict-fidelity)"
+      echo "ike-ingest: WARNING: the fidelity check failed; the AsciiDoc is written, review the report above" >&2
+    fi
+  fi
+fi
+if want split;  then echo "== split";  [ -f "$adoc" ] || die "no AsciiDoc file at $adoc; run the convert step or pass --adoc"; run_goal fragments; fi
+if want check;  then echo "== check";  run_goal coverage; fi
+if want build; then
+  [ -n "$project" ] || die "the build step needs --project"
+  echo "== build: $project ($assembly)"
+  frag="$(cd "$out" && pwd)/fragments"
+  [ -d "$frag/topics/dex" ] || die "no fragments under $frag; run the split step first"
+  ( cd "$project" \
+      && "${MVN_CMD[@]}" -B "$PLUGIN:ingest-place" -N -Dike.place.fragments="$frag" -Dike.place.module="$assembly" \
+      && "${MVN_CMD[@]}" -B "$PLUGIN:topic-registry" -pl topics \
+      && "${MVN_CMD[@]}" -B clean verify -pl "assemblies/$assembly" -am "${extra[@]}" )
+fi
+echo "ike-ingest: done; reports under $out"
