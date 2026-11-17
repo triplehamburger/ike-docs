@@ -65,6 +65,12 @@ public enum IdocGoal implements GoalRef {
                     + "GUDID record into fragments, with generated header blocks and ids, "
                     + "and build the record as an assembly that includes them. Writes "
                     + "fragments.yaml."),
+    /** {@code idoc:ingest-place} — copy the fragments into a DeX project and register the assembly. */
+    INGEST_PLACE("ingest-place", IngestPlaceMojo.class,
+            "Place the output of idoc:ingest-fragments in a DeX project: copy the "
+                    + "topics into the topics module, create the assembly module and "
+                    + "register it in assemblies/pom.xml. Writes placed.yaml; "
+                    + "ike.place.dryRun=true writes nothing."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="
