@@ -192,4 +192,27 @@ class IngestCoverageTest {
         assertThat(checks(r)).contains("section-missing");
         assertThat(r.report().details().get("sections-missing")).isEqualTo(List.of("C Measurand"));
     }
+
+    @Test
+    void aSectionTitleHeldOnlyByTheAssemblyIsFound() throws Exception {
+        StringBuilder text = new StringBuilder("510(k) SUBSTANTIAL EQUIVALENCE DETERMINATION\nDECISION SUMMARY\n"
+                + "ASSAY ONLY TEMPLATE\n");
+        for (int i = 0; i < TITLES.size(); i++) {
+            text.append((char) ('A' + i)).append(". ").append(TITLES.get(i)).append('\n');
+            text.append(i == 0 ? "K162200\n" : "Body text for this section.\n");
+        }
+        Path pdf = dir.resolve("K162200.pdf");
+        writePdf(pdf, List.of(text.toString()));
+        Path trimmed = Files.createDirectories(dir.resolve("trimmed"));
+        Files.writeString(trimmed.resolve("t.adoc"), text.toString().replace("Measurand:", "Something else"));
+        Path assembly = Files.createDirectories(dir.resolve("assembly"));
+        Files.writeString(assembly.resolve("record.adoc"), "== C Measurand:\n\ninclude::t.adoc[]\n");
+
+        IngestCoverage.Result without = IngestCoverage.run(pdf, trimmed, 1.0);
+        IngestCoverage.Result with = IngestCoverage.run(pdf, trimmed, assembly, 1.0);
+
+        assertThat(checks(without)).contains("section-missing");
+        assertThat(with.report().hasErrors()).as(checks(with)).isFalse();
+        assertThat(with.report().details().get("sections-missing")).isEqualTo(List.of());
+    }
 }
