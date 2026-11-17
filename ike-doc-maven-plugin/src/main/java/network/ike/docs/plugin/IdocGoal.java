@@ -45,6 +45,10 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest} — run fragments and coverage in order. */
+    INGEST("ingest", IngestMojo.class,
+            "Run idoc:ingest-fragments and idoc:ingest-coverage "
+                    + "in order from one set of parameters; ike.ingest.only runs one step."),
     /** {@code idoc:ingest-coverage} — check that topics still hold what their source PDF says. */
     INGEST_COVERAGE("ingest-coverage", IngestCoverageMojo.class,
             "Compare a source PDF's words with the topics written from it, "
