@@ -45,6 +45,11 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest-convert} — convert a source PDF to one AsciiDoc file and check its fidelity. */
+    INGEST_CONVERT("ingest-convert", IngestConvertMojo.class,
+            "Convert a source PDF to one AsciiDoc file with the converter command, "
+                    + "then run the fidelity check against the PDF; a failed check "
+                    + "warns unless ike.convert.strictFidelity=true. Writes convert.yaml."),
     /** {@code idoc:ingest-split} — split a converted decision summary into fragments and an assembly. */
     INGEST_SPLIT("ingest-split", IngestSplitMojo.class,
             "Split the single AsciiDoc file of a 510(k) decision summary, IFU or "

@@ -107,6 +107,11 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   group, a topic's directory equals its id's domain prefix, images
   are inside packages. Lines still using `{topics}` are warnings.
 
+| `idoc:ingest-convert`
+| Convert a source PDF to one AsciiDoc file with the converter command, then
+  check the result against the PDF. See xref:ingest-convert[Ingest convert]
+  below.
+
 | `idoc:ingest-split`
 | Split the single AsciiDoc file of a 510(k) decision summary, IFU or GUDID
   record into fragments with generated headers and ids, build the record as
@@ -373,6 +378,33 @@ the root or directly under a group. An include or image line that
 still uses the `{topics}` alias is a warning naming the file and line,
 so the alias can be retired once the last one is gone.
 `-Dike.skip.lint-packages=true` skips it.
+
+[[ingest-convert]]
+== Ingest convert (`idoc:ingest-convert`)
+
+`idoc:ingest-convert` is the first stage of an ingestion. It runs the converter
+that turns a source PDF into one AsciiDoc file, then runs the fidelity check of
+the converter against the PDF.
+
+[source,bash]
+----
+mvn idoc:ingest-convert -Dike.ingest.source=K230440.pdf
+----
+
+The converter and the fidelity check are commands outside Maven, set with
+`ike.convert.command` (default `ike-convert`, run as `COMMAND PDF -o ADOC`) and
+`ike.convert.fidelityCommand` (default `ike-fidelity`, run as `COMMAND PDF
+ADOC`). A setting may carry arguments, for example
+`"python utilities/document_to_asciidoc.py"`; wrap a part in double quotes to
+keep a space in it. Commands start from an argument list and never through a
+shell, each with a time limit (`ike.convert.timeoutMinutes`, default 30).
+
+The goal writes `K230440.adoc` and `convert.yaml` under `target/ingest`
+(`ike.ingest.outputDir`; `ike.ingest.adoc` names the file). It fails when the
+converter cannot be started, exits non-zero or writes no file. A failed
+fidelity check is a warning and the AsciiDoc is kept; set
+`ike.convert.strictFidelity=true` to make it an error, or
+`ike.convert.fidelity=false` to skip the check.
 
 [[ingest-split]]
 == Ingest split (`idoc:ingest-split`)
