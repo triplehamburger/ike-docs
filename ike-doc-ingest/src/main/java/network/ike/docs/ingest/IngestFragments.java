@@ -65,6 +65,9 @@ public final class IngestFragments {
     private static final Pattern GUDID_DI =
             Pattern.compile("Primary DI Number:? ?(\\d{14})|DEVICE: [^()]{1,80}\\((\\d{14})\\)");
     private static final Pattern LOCAL_IMAGE = Pattern.compile("image::?file:///");
+    /// An AsciiDoc preprocessor directive at the start of a line. The renderer runs in unsafe mode, so an
+    /// `include::` line in text taken from a PDF would pull a local file into the output.
+    private static final Pattern DIRECTIVE = Pattern.compile("^\\s*(include|ifdef|ifndef|ifeval|endif)::");
     private static final Pattern HEADING =Pattern.compile("^(={1,6}) (\\S.*?)\\s*$");
     private static final Pattern FENCE = Pattern.compile("^(-{4,}|\\.{4,}|\\+{4,}|/{4,}|={4,}|\\|={3,})\\s*$");
     private static final Pattern LABEL = Pattern.compile("^([IVX]{1,4}|[A-Z]|\\d+(?:\\.\\d+)*)\\.?\\s+(\\S.*)$");
@@ -180,7 +183,21 @@ public final class IngestFragments {
             return failed(sources, details, findings);
         }
 
-        List<String> lines = relevel(List.of(text.split("\n", -1)), name, findings);
+        String[] rawLines = text.split("\n", -1);
+        for (int i = 0; i < rawLines.length; i++) {
+            Matcher directive = DIRECTIVE.matcher(rawLines[i]);
+            if (directive.find()) {
+                findings.add(Finding.error("unsafe-directive", name + " line " + (i + 1),
+                        "the line starts with the AsciiDoc directive " + directive.group(1) + ":: which the "
+                                + "renderer would act on, for example by including a local file; remove or "
+                                + "rewrite it in the converted file"));
+            }
+        }
+        if (findings.stream().anyMatch(Finding::isError)) {
+            return failed(sources, details, findings);
+        }
+
+        List<String> lines = relevel(List.of(rawLines), name, findings);
         List<Heading> headings = headings(lines);
         final int chosen = options.sectionLevel() == AUTO_SECTION_LEVEL ? autoLevel(headings)
                 : options.sectionLevel();

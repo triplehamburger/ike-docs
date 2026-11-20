@@ -369,6 +369,33 @@ class IngestFragmentsTest {
     }
 
     @Test
+    void aPreprocessorDirectiveInTheTextIsAnErrorAndNothingIsWritten() throws Exception {
+        for (String directive : new String[] {"include::C:/secrets/keys.txt[]", "ifdef::x[]", "ifndef::x[]",
+                "ifeval::[1 == 1]", "endif::[]", "  include::/etc/hosts[]"}) {
+            IngestFragments.Result r = IngestFragments.run(
+                    write("k.adoc", RECORD.replace("The assay was linear.", directive)), IngestFragments.Options.defaults());
+
+            assertThat(checks(r)).as(directive).isEqualTo("unsafe-directive");
+            assertThat(r.fragments()).as(directive).isEmpty();
+            assertThat(r.report().findings().get(0).component()).contains("line 23");
+        }
+    }
+
+    @Test
+    void aDirectiveInsideAListingBlockIsStillRejectedAndAnEscapedOneIsNot() throws Exception {
+        String inListing = RECORD.replace("== this line is inside a listing block", "include::/etc/hosts[]");
+        assertThat(checks(IngestFragments.run(write("a.adoc", inListing), IngestFragments.Options.defaults())))
+                .isEqualTo("unsafe-directive");
+
+        String escaped = RECORD.replace("The assay was linear.", "\\include::/etc/hosts[]");
+        assertThat(checks(IngestFragments.run(write("b.adoc", escaped), IngestFragments.Options.defaults())))
+                .doesNotContain("unsafe-directive");
+        String midLine = RECORD.replace("The assay was linear.", "See the include:: macro in the manual.");
+        assertThat(checks(IngestFragments.run(write("c.adoc", midLine), IngestFragments.Options.defaults())))
+                .doesNotContain("unsafe-directive");
+    }
+
+    @Test
     void theSlugDropsTheLabelLongQualifiersAndPunctuation() {
         assertThat(IngestFragments.slug("I Background Information:")).isEqualTo("background-information");
         assertThat(IngestFragments.slug("VII Performance Characteristics (if/when applicable):"))
