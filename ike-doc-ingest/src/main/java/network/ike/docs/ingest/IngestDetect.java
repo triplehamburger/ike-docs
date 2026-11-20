@@ -9,7 +9,7 @@ import java.util.Locale;
 import java.util.Map;
 
 /// Read a source PDF and classify it as a 510(k) decision summary or something
-/// else. It is a library step, not a Maven goal: `idoc:ingest-coverage` uses it
+/// else. It is a library step, not a Maven goal: the coverage check uses it
 /// to find the sections the topics must hold.
 ///
 /// A PDF with a text layer is classified from its text. A scanned PDF has no
