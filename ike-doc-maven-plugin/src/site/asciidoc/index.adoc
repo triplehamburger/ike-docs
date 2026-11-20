@@ -107,6 +107,11 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   group, a topic's directory equals its id's domain prefix, images
   are inside packages. Lines still using `{topics}` are warnings.
 
+| `idoc:ingest-split`
+| Split the single AsciiDoc file of a 510(k) decision summary, IFU or GUDID
+  record into fragments with generated headers and ids, and build the record
+  as an assembly. See xref:ingest-split[Ingest split] below.
+
 | `idoc:adocstudio`
 | Generate Adoc Studio sidecar projects for assembly modules.
 
@@ -367,6 +372,53 @@ the root or directly under a group. An include or image line that
 still uses the `{topics}` alias is a warning naming the file and line,
 so the alias can be retired once the last one is gone.
 `-Dike.skip.lint-packages=true` skips it.
+
+[[ingest-split]]
+== Ingest split (`idoc:ingest-split`)
+
+`idoc:ingest-split` cuts the single AsciiDoc file of a 510(k) decision
+summary (or an IFU, a GUDID record or another converted document) into
+fragments and builds the record as an assembly that includes them in order.
+
+[source,bash]
+----
+mvn idoc:ingest-split -Dike.fragments.source=K230440.adoc
+----
+
+The goal writes, under `target/fragments`:
+
+* `topics/dex/*.adoc`, one file per fragment: verbatim text with a generated
+  header block, a literal anchor and the id `dex-{document}-{slug}`;
+* `assembly/`, the source's title block followed by an `include::` for each
+  fragment; and
+* `fragments.yaml`, the report.
+
+A top-level section is one fragment. A section over `ike.fragments.sizeLimit`
+(5000 characters) is split at its lettered subsections, and a subsection still
+over the limit at its top-level numbered items; a small item merges into the
+one before it. A fragment that cannot be split further is kept whole and noted
+in its `:topic-notes:`.
+
+The `{document}` part of an id is the 510(k) number, the GUDID primary DI
+number, `ike.fragments.documentId`, or the document title, in that order. The
+heading level to split on is chosen from the headings unless
+`ike.fragments.sectionLevel` is set. A document with a title and no sections is
+one fragment. When every heading has one level (as Docling writes them), levels
+are inferred from the printed labels.
+
+The goal fails, and writes no fragment, when no document id or sections can be
+found, when a heading sits above the split level between sections, or when the
+split would change any word. A repeated id gets a numeric suffix and a warning.
+Documents other than a 510(k) carry an unconfirmed license. The summary,
+keywords and index terms are placeholders built from the heading.
+
+The goal also checks each fragment id against the topics already under
+`ike.fragments.existingRoots` (default: the module's `src/docs/asciidoc`).
+A fragment whose id is declared by a file with a different name fails the goal
+with a `duplicate-id` error, because placing it would give two files one id. A
+fragment whose id and file name match an existing topic replaces it, and the
+report notes how many do. A root that does not exist is skipped with a note;
+set the property to blank to turn the check off.
 
 == Design rationale
 

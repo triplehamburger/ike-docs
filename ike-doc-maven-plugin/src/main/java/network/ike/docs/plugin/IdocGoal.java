@@ -45,6 +45,12 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest-split} — split a converted decision summary into fragments and an assembly. */
+    INGEST_SPLIT("ingest-split", IngestSplitMojo.class,
+            "Split the single AsciiDoc file of a 510(k) decision summary, IFU or "
+                    + "GUDID record into fragments, with generated header blocks and ids, "
+                    + "and build the record as an assembly that includes them. Writes "
+                    + "fragments.yaml."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="
