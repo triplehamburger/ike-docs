@@ -1,6 +1,7 @@
 package network.ike.docs.plugin;
 
 import network.ike.docs.ingest.Finding;
+import network.ike.docs.ingest.IngestCoverage;
 import network.ike.docs.ingest.IngestFragments;
 import network.ike.docs.ingest.IngestReport;
 import network.ike.docs.ingest.IngestYaml;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -43,10 +45,21 @@ import java.util.Map;
  * existing topic replaces it and is noted; a fragment whose id is declared by
  * a differently named file is an error and nothing is written.
  *
+ * <p>A second step, {@code coverage}, then checks the fragments against the
+ * source PDF ({@code ike.ingest.source}): every word and number of the PDF text
+ * is counted and the words the fragments lack are reported page by page, so a
+ * dropped section shows as a run of weak pages. The goal fails when the
+ * fragments lack more of the PDF's words than {@code ike.ingest.maxMissing}
+ * allows, when a decision-summary section title is absent from the fragments
+ * and the assembly, or when the PDF is scanned (there is no text to compare;
+ * scanned PDFs are not supported yet) or unreadable. Writes
+ * {@code coverage.yaml} beside {@code fragments.yaml}.
+ *
  * <p>Typical use:
  *
  * <pre>
- *   mvn idoc:ingest-split -Dike.fragments.source=K230440.adoc
+ *   mvn idoc:ingest-split -Dike.fragments.source=K230440.adoc -Dike.ingest.source=K230440.pdf
+ *   mvn idoc:ingest-split -Dike.fragments.source=K230440.adoc -Dike.ingest.steps=fragments
  * </pre>
  *
  * @since 136
@@ -94,6 +107,21 @@ public class IngestSplitMojo implements org.apache.maven.api.plugin.Mojo {
                defaultValue = "${project.basedir}/src/docs/asciidoc")
     String existingRoots;
 
+    /** The source PDF the fragments were written from; the coverage step compares its words with them. */
+    @Parameter(property = "ike.ingest.source")
+    File pdf;
+
+    /** The steps to run, comma-separated, from {@code fragments} and {@code coverage}; unset, both run in that order. */
+    @Parameter(property = "ike.ingest.steps")
+    String steps;
+
+    /** The share of the PDF's words the fragments may lack, from 0 to 1. */
+    @Parameter(property = "ike.ingest.maxMissing", defaultValue = "0.10")
+    double maxMissing;
+
+    /** The steps of this goal, in run order. */
+    static final List<String> STEPS = List.of("fragments", "coverage");
+
     /** The most {@code .adoc} files one existing root may hold before the check fails. */
     private static final int MAX_EXISTING_FILES = 5000;
 
@@ -102,6 +130,46 @@ public class IngestSplitMojo implements org.apache.maven.api.plugin.Mojo {
 
     @Override
     public void execute() throws MojoException {
+        List<String> toRun = stepsToRun(steps);
+        if (toRun.contains("coverage") && pdf == null) {
+            throw new MojoException("idoc:ingest-split needs ike.ingest.source, the source PDF, to run the "
+                    + "coverage step; pass -Dike.ingest.steps=fragments to run only the split");
+        }
+        for (String step : toRun) {
+            log.info("idoc:ingest-split: step " + step);
+            switch (step) {
+                case "fragments" -> fragments();
+                case "coverage" -> coverage();
+                default -> throw new MojoException("idoc:ingest-split: unknown step " + step);
+            }
+        }
+    }
+
+    /**
+     * The steps to run for a {@code steps} value, in run order whatever order
+     * they were named in.
+     *
+     * @param steps the requested steps, comma-separated, or null or blank for all
+     * @return the steps in run order
+     * @throws MojoException when a name is not a step
+     */
+    static List<String> stepsToRun(String steps) throws MojoException {
+        if (steps == null || steps.isBlank()) {
+            return STEPS;
+        }
+        List<String> named = new java.util.ArrayList<>();
+        for (String part : steps.split(",")) {
+            String step = part.strip().toLowerCase(Locale.ROOT);
+            if (!STEPS.contains(step)) {
+                throw new MojoException("idoc:ingest-split: ike.ingest.steps must name steps from " + STEPS
+                        + ", not '" + part.strip() + "'");
+            }
+            named.add(step);
+        }
+        return STEPS.stream().filter(named::contains).toList();
+    }
+
+    private void fragments() throws MojoException {
         Path out = outputDir.getAbsoluteFile().toPath();
         Path report = out.resolve("fragments.yaml");
         IngestFragments.Result result = IngestFragments.run(source.getAbsoluteFile().toPath(),
@@ -124,6 +192,36 @@ public class IngestSplitMojo implements org.apache.maven.api.plugin.Mojo {
         if (!result.report().hasErrors()) {
             log.info("idoc:ingest-split: " + result.fragments().size() + " fragments and " + result.assemblyName()
                     + " written under " + out);
+        }
+        for (Finding f : result.report().findings()) {
+            String line = "[" + f.check() + "] " + f.component() + ": " + f.message();
+            switch (f.severity()) {
+                case ERROR -> log.error(line);
+                case WARNING -> log.warn(line);
+                case INFO -> log.info(line);
+            }
+        }
+        if (result.report().hasErrors()) {
+            long errors = result.report().findings().stream().filter(Finding::isError).count();
+            throw new MojoException("idoc:ingest-split found " + errors + " error(s); see " + report);
+        }
+    }
+
+    private void coverage() throws MojoException {
+        Path out = outputDir.getAbsoluteFile().toPath();
+        Path report = out.resolve("coverage.yaml");
+        IngestCoverage.Result result = IngestCoverage.run(pdf.getAbsoluteFile().toPath(), out.resolve("topics"),
+                out.resolve("assembly"), maxMissing);
+        try {
+            IngestYaml.writeAtomic(report, IngestYaml.reportToYaml(result.report()));
+        } catch (IOException e) {
+            throw new MojoException("idoc:ingest-split could not write " + report + ": " + e.getMessage(), e);
+        }
+        var details = result.report().details();
+        if (details.containsKey("source-words")) {
+            log.info("idoc:ingest-split: " + details.get("missing-words") + " of " + details.get("source-words")
+                    + " words missing (" + details.get("missing-share") + "), "
+                    + ((List<?>) details.get("weak-pages")).size() + " weak page(s)");
         }
         for (Finding f : result.report().findings()) {
             String line = "[" + f.check() + "] " + f.component() + ": " + f.message();

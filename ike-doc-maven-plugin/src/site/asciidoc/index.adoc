@@ -109,8 +109,9 @@ existence in `ike-parent`'s `doc-pipeline` profile.
 
 | `idoc:ingest-split`
 | Split the single AsciiDoc file of a 510(k) decision summary, IFU or GUDID
-  record into fragments with generated headers and ids, and build the record
-  as an assembly. See xref:ingest-split[Ingest split] below.
+  record into fragments with generated headers and ids, build the record as
+  an assembly, then check the fragments against the source PDF. See
+  xref:ingest-split[Ingest split] below.
 
 | `idoc:adocstudio`
 | Generate Adoc Studio sidecar projects for assembly modules.
@@ -419,6 +420,31 @@ with a `duplicate-id` error, because placing it would give two files one id. A
 fragment whose id and file name match an existing topic replaces it, and the
 report notes how many do. A root that does not exist is skipped with a note;
 set the property to blank to turn the check off.
+
+=== Coverage
+
+A second step, `coverage`, compares the words and numbers of the source PDF
+(`ike.ingest.source`) with the fragments, so a split that dropped sections
+fails the build instead of passing as a summary. Running page headers, footers
+and page numbers are left out of the PDF's count.
+
+[source,bash]
+----
+mvn idoc:ingest-split -Dike.fragments.source=K230440.adoc -Dike.ingest.source=K230440.pdf
+----
+
+The step writes `coverage.yaml` beside `fragments.yaml` and fails when:
+
+* the fragments lack more of the PDF's words than `ike.ingest.maxMissing`
+  allows (default `0.10`);
+* a decision summary's section title appears in neither the fragments nor the
+  assembly; or
+* the PDF is scanned (there is no text to compare; scanned PDFs are not
+  supported yet) or cannot be read.
+
+Pages where less than 60% of the distinct words are in the fragments are
+listed as warnings, which is how a dropped section shows. `ike.ingest.steps`
+runs one step: `fragments` or `coverage`.
 
 == Design rationale
 

@@ -49,8 +49,9 @@ public enum IdocGoal implements GoalRef {
     INGEST_SPLIT("ingest-split", IngestSplitMojo.class,
             "Split the single AsciiDoc file of a 510(k) decision summary, IFU or "
                     + "GUDID record into fragments, with generated header blocks and ids, "
-                    + "and build the record as an assembly that includes them. Writes "
-                    + "fragments.yaml."),
+                    + "and build the record as an assembly that includes them, then check "
+                    + "the fragments' words against the source PDF. Writes fragments.yaml "
+                    + "and coverage.yaml; ike.ingest.steps runs one step."),
     /** {@code idoc:lint-packages} — lint the packages layout of a topic library (#1341). */
     LINT_PACKAGES("lint-packages", LintPackagesMojo.class,
             "Lint a topic library laid out as packages (ike.adoc.layout="

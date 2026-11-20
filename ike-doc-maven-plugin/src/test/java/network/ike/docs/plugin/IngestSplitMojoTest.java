@@ -12,12 +12,14 @@ import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/// The existing-topics check of `idoc:ingest-split`: a fragment id that an
-/// existing topic already declares is caught before the fragments are placed.
+/// `idoc:ingest-split`: the existing-topics check (a fragment id that an existing
+/// topic already declares is caught before the fragments are placed), step
+/// selection, and the stop at the first failing step.
 class IngestSplitMojoTest {
 
     private static final String RECORD = """
@@ -67,6 +69,8 @@ class IngestSplitMojoTest {
         mojo.sizeLimit = 5000;
         mojo.split = true;
         mojo.existingRoots = existingRoots;
+        mojo.steps = "fragments";
+        mojo.maxMissing = 0.10;
         return mojo;
     }
 
@@ -128,5 +132,45 @@ class IngestSplitMojoTest {
 
         assertThat(dir.resolve("out/fragments.yaml")).content().doesNotContain("duplicate-id");
         assertThat(dir.resolve("out/topics/dex/" + first.fileName())).exists();
+    }
+
+    @Test
+    void noStepsValueRunsBothStepsInOrder() throws Exception {
+        assertThat(IngestSplitMojo.stepsToRun(null)).containsExactly("fragments", "coverage");
+        assertThat(IngestSplitMojo.stepsToRun(" ")).containsExactly("fragments", "coverage");
+    }
+
+    @Test
+    void namedStepsRunInRunOrderWhateverTheNamingOrder() throws Exception {
+        assertThat(IngestSplitMojo.stepsToRun("Coverage")).isEqualTo(List.of("coverage"));
+        assertThat(IngestSplitMojo.stepsToRun("coverage, fragments")).containsExactly("fragments", "coverage");
+    }
+
+    @Test
+    void anUnknownStepIsRejectedAndNamesTheChoices() {
+        assertThatThrownBy(() -> IngestSplitMojo.stepsToRun("render"))
+                .isInstanceOf(MojoException.class).hasMessageContaining("fragments").hasMessageContaining("render");
+    }
+
+    @Test
+    void theCoverageStepNeedsTheSourcePdf() {
+        IngestSplitMojo mojo = mojo(library.toString());
+        mojo.steps = null;
+
+        assertThatThrownBy(mojo::execute)
+                .isInstanceOf(MojoException.class).hasMessageContaining("ike.ingest.source");
+        assertThat(dir.resolve("out")).doesNotExist();
+    }
+
+    @Test
+    void aFailingStepStopsTheRunBeforeTheNextOne() {
+        IngestSplitMojo mojo = mojo(library.toString());
+        mojo.steps = null;
+        mojo.source = dir.resolve("absent.adoc").toFile();
+        mojo.pdf = dir.resolve("absent.pdf").toFile();
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoException.class).hasMessageContaining("ingest-split");
+
+        assertThat(dir.resolve("out/coverage.yaml")).doesNotExist();
     }
 }
