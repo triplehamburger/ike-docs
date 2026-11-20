@@ -45,6 +45,12 @@ public enum IdocGoal implements GoalRef {
     /** {@code idoc:inject-breadcrumb} — inject breadcrumbs into rendered HTML. */
     INJECT_BREADCRUMB("inject-breadcrumb", InjectBreadcrumbMojo.class,
             "Inject breadcrumb navigation into rendered HTML."),
+    /** {@code idoc:ingest-build} — place the fragments in a DeX project, check its topics, and render. */
+    INGEST_BUILD("ingest-build", IngestBuildMojo.class,
+            "Place the output of idoc:ingest-split in a DeX project (topics, assembly "
+                    + "module, registration in assemblies/pom.xml), run the topic registry "
+                    + "check, and render the assembly with a child Maven. Writes placed.yaml; "
+                    + "ike.build.dryRun=true writes nothing."),
     /** {@code idoc:ingest-convert} — convert a source PDF to one AsciiDoc file and check its fidelity. */
     INGEST_CONVERT("ingest-convert", IngestConvertMojo.class,
             "Convert a source PDF to one AsciiDoc file with the converter command, "

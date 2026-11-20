@@ -107,6 +107,10 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   group, a topic's directory equals its id's domain prefix, images
   are inside packages. Lines still using `{topics}` are warnings.
 
+| `idoc:ingest-build`
+| Place the fragments in a DeX project, check its topic registry and render
+  the assembly. See xref:ingest-build[Ingest build] below.
+
 | `idoc:ingest-convert`
 | Convert a source PDF to one AsciiDoc file with the converter command, then
   check the result against the PDF. See xref:ingest-convert[Ingest convert]
@@ -378,6 +382,40 @@ the root or directly under a group. An include or image line that
 still uses the `{topics}` alias is a warning naming the file and line,
 so the alias can be retired once the last one is gone.
 `-Dike.skip.lint-packages=true` skips it.
+
+[[ingest-build]]
+== Ingest build (`idoc:ingest-build`)
+
+`idoc:ingest-build` takes the fragments written by `idoc:ingest-split` into a
+DeX project and renders the result. It runs three steps in order.
+
+[source,bash]
+----
+mvn idoc:ingest-build -N -Dike.build.project=../dex -Dike.build.fragments=target/fragments
+----
+
+. `place` copies the topic files into the project's topics module, creates the
+  assembly as a new module under `assemblies` (its `pom.xml` and its `.adoc`)
+  and registers it in `assemblies/pom.xml`. Nothing is placed when the split
+  recorded an error or when a fragment file name is used by a topic with a
+  different id. A topic with the same file name and id is replaced, which is
+  how a re-ingest updates it. `ike.build.dryRun=true` reports what would be
+  placed and stops.
+. `registry` runs `idoc:topic-registry` in the project and fails on its
+  findings. The registry is written under `ike.ingest.outputDir`
+  (`topic-registry.yaml`), not under the project's `target`, so the clean of
+  the next step does not remove it.
+. `render` runs `mvn clean verify -pl assemblies/MODULE -am` in the project.
+
+The registry and render steps run a child Maven: the running Maven's own
+launcher unless `ike.build.mavenCommand` says otherwise. `ike.build.mavenArgs`
+adds arguments to both runs, `ike.build.plugin` sets the plugin coordinates
+(add `:VERSION` to pin) and `ike.build.timeoutMinutes` the time limit. Child
+processes start from an argument list, never through a shell, and their full
+output is written to `build-registry.log` and `build-render.log` under the
+output directory. `ike.ingest.steps` runs some steps alone; the render step
+alone needs `ike.build.module`. Pass `-N` in a multi-module project, or the
+goal runs once in every module.
 
 [[ingest-convert]]
 == Ingest convert (`idoc:ingest-convert`)
