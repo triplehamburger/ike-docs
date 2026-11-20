@@ -107,6 +107,10 @@ existence in `ike-parent`'s `doc-pipeline` profile.
   group, a topic's directory equals its id's domain prefix, images
   are inside packages. Lines still using `{topics}` are warnings.
 
+| `idoc:ingest`
+| Ingest a source PDF: convert it, split it into fragments and, when a DeX
+  project is given, place, check and render. See xref:ingest[Ingest] below.
+
 | `idoc:ingest-build`
 | Place the fragments in a DeX project, check its topic registry and render
   the assembly. See xref:ingest-build[Ingest build] below.
@@ -382,6 +386,42 @@ the root or directly under a group. An include or image line that
 still uses the `{topics}` alias is a warning naming the file and line,
 so the alias can be retired once the last one is gone.
 `-Dike.skip.lint-packages=true` skips it.
+
+[[ingest]]
+== Ingest (`idoc:ingest`)
+
+`idoc:ingest` ingests a source PDF by running three stages in order from one set
+of parameters, and stops at the first that fails.
+
+[source,bash]
+----
+mvn idoc:ingest -N -Dike.ingest.source=K230440.pdf -Dike.ingest.project=../dex
+----
+
+[cols="1,2"]
+|===
+| Stage | Goal
+
+| `convert`
+| xref:ingest-convert[`idoc:ingest-convert`]: the converter, then the fidelity check.
+
+| `split`
+| xref:ingest-split[`idoc:ingest-split`]: fragments and an assembly, then the coverage check.
+
+| `build`
+| xref:ingest-build[`idoc:ingest-build`]: place in a DeX project, registry check, render.
+|===
+
+The `build` stage runs only when `ike.ingest.project`, the DeX project folder,
+is set. `ike.ingest.stages` runs some stages alone, for example
+`-Dike.ingest.stages=split` to split a file that is already converted. Each
+stage's goal can also be run alone; this goal passes on the settings of all
+three. Everything is written under `ike.ingest.outputDir` (default
+`target/ingest`): the converted `K230440.adoc` and `convert.yaml`, a `fragments`
+folder with `fragments.yaml` and `coverage.yaml`, and the build stage's
+`placed.yaml`, `topic-registry.yaml` and Maven logs. When a project is set, the
+split stage checks fragment ids against the topics under its
+`topics/src/docs/asciidoc` folder.
 
 [[ingest-build]]
 == Ingest build (`idoc:ingest-build`)
