@@ -28,6 +28,16 @@
 ///   and template it uses
 /// - {@link network.ike.docs.ingest.IngestDetect} — classify a source PDF
 ///   as a decision summary or not
+/// - {@link network.ike.docs.ingest.Manifest} — `ingest.yaml`, the
+///   per-document record of what each stage read, wrote and ran, and the
+///   rule for skipping a stage that has not changed
+/// - {@link network.ike.docs.ingest.ToolRunner},
+///   {@link network.ike.docs.ingest.ToolIdentity} and
+///   {@link network.ike.docs.ingest.ToolTrustPolicy} — run an external tool
+///   from an argument list, identify it by hash, and decide whether it may run
+/// - {@link network.ike.docs.ingest.PathJail} and
+///   {@link network.ike.docs.ingest.SourceKind} — keep paths inside a root,
+///   and tell a PDF from a Word file by its bytes
 ///
 /// See IKE-Network/ike-issues#550 for the design proposal that
 /// factored this module out of `hl7-ig-corpus-example/ingest/`.

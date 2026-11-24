@@ -4,6 +4,7 @@ import network.ike.docs.ingest.Finding;
 import network.ike.docs.ingest.IngestHash;
 import network.ike.docs.ingest.IngestReport;
 import network.ike.docs.ingest.IngestYaml;
+import network.ike.docs.ingest.ToolRunner;
 import org.apache.maven.api.plugin.MojoException;
 import org.apache.maven.api.plugin.annotations.Mojo;
 import org.apache.maven.api.plugin.annotations.Parameter;
