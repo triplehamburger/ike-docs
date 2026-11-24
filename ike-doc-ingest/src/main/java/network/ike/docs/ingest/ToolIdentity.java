@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -114,36 +115,68 @@ public record ToolIdentity(String program, String programSha256, String script, 
     }
 
     private static Path find(String program, Path base) {
+        boolean windows = ToolRunner.isWindows();
+        String pathext = windows ? System.getenv().getOrDefault("PATHEXT", ".COM;.EXE;.BAT;.CMD") : "";
+        List<String> names = candidateNames(program, windows, pathext);
         if (program.contains("/") || program.contains("\\")) {
-            return regularFile(program, base);
+            for (String name : names) {
+                Path found = regularFile(name, base);
+                if (found != null) {
+                    return found;
+                }
+            }
+            return null;
         }
         String path = System.getenv("PATH");
         if (path == null) {
             return null;
         }
-        List<String> extensions = List.of("");
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
-            String pathext = System.getenv().getOrDefault("PATHEXT", ".COM;.EXE;.BAT;.CMD");
-            List<String> all = new java.util.ArrayList<>(List.of(""));
-            for (String ext : pathext.split(";")) {
-                if (!ext.isBlank()) {
-                    all.add(ext.toLowerCase(Locale.ROOT));
-                }
-            }
-            extensions = all;
-        }
         for (String dir : path.split(java.io.File.pathSeparator)) {
             if (dir.isBlank()) {
                 continue;
             }
-            for (String ext : extensions) {
-                Path found = regularFile(program + ext, Path.of(dir));
+            for (String name : names) {
+                Path found = regularFile(name, Path.of(dir));
                 if (found != null) {
                     return found;
                 }
             }
         }
         return null;
+    }
+
+    /// The file names to try for a program, in the order the system would use
+    /// them. On Windows a name without an executable extension is tried with
+    /// each extension of `PATHEXT` first and bare last, because an
+    /// extensionless file next to `mvn.cmd` (Maven's shell script `mvn`) is
+    /// not what runs. Elsewhere the name is used as it is.
+    ///
+    /// @param name    the program as given
+    /// @param windows whether the Windows rules apply
+    /// @param pathext the `PATHEXT` value, semicolon separated
+    /// @return the names to try
+    static List<String> candidateNames(String name, boolean windows, String pathext) {
+        if (!windows) {
+            return List.of(name);
+        }
+        List<String> extensions = new ArrayList<>();
+        for (String ext : pathext.split(";")) {
+            if (!ext.isBlank()) {
+                extensions.add(ext.strip().toLowerCase(Locale.ROOT));
+            }
+        }
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (String ext : extensions) {
+            if (lower.endsWith(ext)) {
+                return List.of(name);
+            }
+        }
+        List<String> names = new ArrayList<>();
+        for (String ext : extensions) {
+            names.add(name + ext);
+        }
+        names.add(name);
+        return names;
     }
 
     private static Path regularFile(String name, Path base) {

@@ -7,9 +7,11 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.UnaryOperator;
@@ -41,6 +43,14 @@ public final class ToolRunner {
     }
 
     private ToolRunner() {
+    }
+
+    /// Whether this is Windows, where variable names and program extensions
+    /// are handled differently.
+    ///
+    /// @return true on Windows
+    static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
     }
 
     /// Run a command and wait for it, with the inherited environment and the
@@ -89,7 +99,12 @@ public final class ToolRunner {
             builder.directory(workDir.toFile());
         }
         Map<String, String> childEnv = builder.environment();
-        Map<String, String> chosen = environment.apply(new java.util.LinkedHashMap<>(childEnv));
+        // Windows names environment variables without regard to case ("Path"), so the hook
+        // gets a map that does the same; a scrubber that removes "PATH" then really does.
+        Map<String, String> inherited = isWindows()
+                ? new TreeMap<>(String.CASE_INSENSITIVE_ORDER) : new LinkedHashMap<>();
+        inherited.putAll(childEnv);
+        Map<String, String> chosen = environment.apply(inherited);
         childEnv.clear();
         childEnv.putAll(chosen);
         childEnv.putAll(env);

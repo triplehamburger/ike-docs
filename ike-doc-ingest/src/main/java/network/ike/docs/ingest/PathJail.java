@@ -3,6 +3,7 @@ package network.ike.docs.ingest;
 import java.io.IOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -84,17 +85,36 @@ public final class PathJail {
         }
     }
 
-    /// The real path of the part that exists, with the missing remainder appended.
+    /// The most symbolic links followed by hand before the path is given up as a loop.
+    private static final int MAX_LINKS = 40;
+
     private static Path real(Path absolute) throws IOException {
+        return real(absolute, 0);
+    }
+
+    /// The real path of the part that exists, with the missing remainder appended.
+    /// A symbolic link is looked for without following it, so a link whose
+    /// target does not exist yet is still followed, by hand, to where a write
+    /// through it would land.
+    private static Path real(Path absolute, int links) throws IOException {
         Path existing = absolute;
         Path remainder = null;
-        while (existing != null && !Files.exists(existing)) {
+        while (existing != null && !Files.exists(existing, LinkOption.NOFOLLOW_LINKS)) {
             Path name = existing.getFileName();
             remainder = remainder == null ? name : name.resolve(remainder);
             existing = existing.getParent();
         }
         if (existing == null) {
             return absolute;
+        }
+        if (Files.isSymbolicLink(existing)) {
+            if (links >= MAX_LINKS) {
+                throw new IOException("too many symbolic links in " + absolute);
+            }
+            Path target = Files.readSymbolicLink(existing);
+            Path resolved = (target.isAbsolute() ? target : existing.toAbsolutePath().getParent().resolve(target))
+                    .normalize();
+            return real(remainder == null ? resolved : resolved.resolve(remainder).normalize(), links + 1);
         }
         Path real = existing.toRealPath();
         return remainder == null ? real : real.resolve(remainder).normalize();

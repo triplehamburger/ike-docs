@@ -1,5 +1,6 @@
 package network.ike.docs.ingest;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +47,26 @@ class ToolIdentityTest {
         assertThat(identity.program()).isEqualTo("no-such-program-xyz");
         assertThat(identity.programSha256()).isNull();
         assertThat(identity.version()).isNull();
+    }
+
+    @Test
+    void candidateNames_triesTheExtensionsFirstAndTheBareNameLastOnWindows() {
+        assertThat(ToolIdentity.candidateNames("mvn", true, ".COM;.EXE;.BAT;.CMD"))
+                .containsExactly("mvn.com", "mvn.exe", "mvn.bat", "mvn.cmd", "mvn");
+        assertThat(ToolIdentity.candidateNames("mvn.cmd", true, ".COM;.EXE;.BAT;.CMD"))
+                .containsExactly("mvn.cmd");
+        assertThat(ToolIdentity.candidateNames("MVN.EXE", true, ".exe;.cmd")).containsExactly("MVN.EXE");
+        assertThat(ToolIdentity.candidateNames("mvn", false, "")).containsExactly("mvn");
+    }
+
+    @Test
+    void resolve_prefersTheWindowsLauncherOverAnExtensionlessScriptBesideIt() throws IOException {
+        Assumptions.assumeTrue(ToolRunner.isWindows(), "extension lookup applies on Windows only");
+        Files.writeString(dir.resolve("mvn"), "#!/bin/sh");
+        Path launcher = Files.writeString(dir.resolve("mvn.cmd"), "@echo off");
+        ToolIdentity identity = ToolIdentity.resolve(List.of(dir.resolve("mvn").toString()), dir, null, null);
+        assertThat(identity.program()).isEqualTo(launcher.toAbsolutePath().normalize().toString());
+        assertThat(identity.programSha256()).isEqualTo(IngestHash.sha256Hex("@echo off"));
     }
 
     @Test

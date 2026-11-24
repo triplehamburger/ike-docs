@@ -1,5 +1,6 @@
 package network.ike.docs.ingest;
 
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -89,6 +90,19 @@ class ToolRunnerTest {
                 }, line -> { });
         assertThat(seen.get()).isNotEmpty();
         assertThat(result.output()).contains("one/two");
+    }
+
+    @Test
+    void run_givesTheHookAnEnvironmentThatIgnoresVariableNameCaseOnWindows() throws Exception {
+        Assumptions.assumeTrue(ToolRunner.isWindows(), "variable names differ in case on Windows only");
+        Path hello = source("Hi", "System.out.println(\"hi\");");
+        AtomicReference<Boolean> found = new AtomicReference<>();
+        ToolRunner.run(List.of(java(), hello.toString()), dir, Map.of(), Duration.ofSeconds(60),
+                ToolRunner.OUTPUT_CAP, inherited -> {
+                    found.set(inherited.containsKey("PATH") && inherited.containsKey("path"));
+                    return inherited;
+                }, line -> { });
+        assertThat(found.get()).isTrue();
     }
 
     @Test

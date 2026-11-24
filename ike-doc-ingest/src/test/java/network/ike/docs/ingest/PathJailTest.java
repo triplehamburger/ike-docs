@@ -69,6 +69,35 @@ class PathJailTest {
     }
 
     @Test
+    void recording_followsASymbolicLinkWhoseTargetDoesNotExistYet() throws IOException {
+        Path root = Files.createDirectories(dir.resolve("root"));
+        Path outside = Files.createDirectories(dir.resolve("outside"));
+        try {
+            Files.createSymbolicLink(root.resolve("out.txt"), outside.resolve("new.txt"));
+        } catch (IOException | UnsupportedOperationException e) {
+            Assumptions.abort("symbolic links are not available here: " + e.getMessage());
+        }
+        List<Finding> findings = new ArrayList<>();
+        Path resolved = PathJail.recording(root).resolve(Path.of("out.txt"), findings);
+        assertThat(resolved).isEqualTo(outside.toRealPath().resolve("new.txt"));
+        assertThat(findings).singleElement().satisfies(f -> assertThat(f.check()).isEqualTo("path-outside-root"));
+    }
+
+    @Test
+    void recording_givesUpOnASymbolicLinkLoop() throws IOException {
+        Path root = Files.createDirectories(dir.resolve("root"));
+        try {
+            Files.createSymbolicLink(root.resolve("a"), root.resolve("b"));
+            Files.createSymbolicLink(root.resolve("b"), root.resolve("a"));
+        } catch (IOException | UnsupportedOperationException e) {
+            Assumptions.abort("symbolic links are not available here: " + e.getMessage());
+        }
+        PathJail jail = PathJail.recording(root);
+        assertThatThrownBy(() -> jail.resolve(Path.of("a"), new ArrayList<>()))
+                .isInstanceOf(IOException.class).hasMessageContaining("too many symbolic links");
+    }
+
+    @Test
     void recording_followsASymbolicLinkOutOfTheRoot() throws IOException {
         Path root = Files.createDirectories(dir.resolve("root"));
         Path outside = Files.createDirectories(dir.resolve("outside"));
