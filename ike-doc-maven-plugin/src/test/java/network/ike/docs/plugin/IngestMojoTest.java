@@ -265,6 +265,7 @@ class IngestMojoTest {
         mojo.project = project.toFile();
         mojo.mavenCommand = java + " \"" + mvn + "\" \"" + calls + "\"";
         mojo.mavenArgs = "-o";
+        mojo.requireMetadata = true;
         mojo.execute();
 
         assertThat(project.resolve("topics/src/docs/asciidoc/topics/dex/k1-one.adoc")).exists();
@@ -272,6 +273,8 @@ class IngestMojoTest {
         List<String> lines = Files.readAllLines(calls);
         assertThat(lines).hasSize(3);
         assertThat(lines.get(0)).startsWith(project + " >").contains(":topic-registry -pl topics").endsWith("-o");
+        assertThat(lines.get(0)).contains("-Dike.ingest.requireMetadata=true");
+        assertThat(manifest()).contains("requireMetadata: 'true'");
         assertThat(lines.get(1)).contains("rootFile=").contains("index-dex-records.adoc");
         assertThat(lines.get(2)).contains("clean verify -pl assemblies/DeXRecord_K1 -am");
     }

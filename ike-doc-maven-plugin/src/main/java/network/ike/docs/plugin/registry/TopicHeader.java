@@ -49,6 +49,9 @@ public record TopicHeader(String file, boolean topic, String id, String title, i
                           Map<String, String> attributes, Map<String, String> documentAttributes,
                           String anchor, long charCount, int includes, List<String> findings) {
 
+    /** The {@code :topic-metadata:} value that marks keywords and summary as placeholders. */
+    public static final String PLACEHOLDER = "placeholder";
+
     /** Attributes every topic must declare, without the {@code topic-} prefix. */
     public static final List<String> REQUIRED = List.of("id", "type", "status", "keywords");
 
@@ -224,6 +227,10 @@ public record TopicHeader(String file, boolean topic, String id, String title, i
         }
         if (headingIndex < 0) {
             findings.add("no level-1 heading (= Title)");
+        }
+        if (PLACEHOLDER.equalsIgnoreCase(attributes.getOrDefault("metadata", "").strip())) {
+            findings.add("keywords and summary are placeholders (:topic-metadata: placeholder); write them and "
+                    + "remove that line");
         }
         return new TopicHeader(relative, true, id, title, level, attributes, documentAttributes,
                 anchor, charCount, includes, List.copyOf(findings));

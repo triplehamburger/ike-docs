@@ -516,6 +516,31 @@ public final class TopicRegistry {
     }
 
     /**
+     * The ids of the topics whose header marks keywords and summary as
+     * placeholders ({@code :topic-metadata: placeholder}), in registry order.
+     *
+     * @param model a registry model, as {@link #load} returns it
+     * @return the topic ids, empty when none is marked
+     */
+    public static List<String> placeholderTopics(Map<String, Object> model) {
+        List<String> ids = new ArrayList<>();
+        if (model.get("domains") instanceof List<?> domains) {
+            for (Object d : domains) {
+                if (d instanceof Map<?, ?> domain && domain.get("topics") instanceof List<?> topics) {
+                    for (Object t : topics) {
+                        if (t instanceof Map<?, ?> topic && topic.get("extra") instanceof Map<?, ?> extra
+                                && TopicHeader.PLACEHOLDER.equalsIgnoreCase(
+                                        String.valueOf(extra.get("metadata")).strip())) {
+                            ids.add(String.valueOf(topic.get("id")));
+                        }
+                    }
+                }
+            }
+        }
+        return ids;
+    }
+
+    /**
      * Read a registry written by {@link #yaml(Map)} back into its model.
      *
      * @param registryFile the generated registry file

@@ -265,6 +265,24 @@ class IngestBuildMojoTest {
     }
 
     @Test
+    void requireMetadataIsPassedToBothRegistryRunsAndOnlyThen() throws Exception {
+        IngestBuildMojo off = withFakeMaven("ok");
+        off.execute();
+        assertThat(Files.readAllLines(calls)).noneMatch(l -> l.contains("requireMetadata"));
+
+        Files.delete(calls);
+        IngestBuildMojo on = withFakeMaven("ok");
+        on.requireMetadata = true;
+        on.execute();
+
+        List<String> lines = Files.readAllLines(calls);
+        assertThat(lines).hasSize(3);
+        assertThat(lines.get(0)).contains(":topic-registry").contains("-Dike.ingest.requireMetadata=true");
+        assertThat(lines.get(1)).contains("rootFile=").contains("-Dike.ingest.requireMetadata=true");
+        assertThat(lines.get(2)).doesNotContain("requireMetadata");
+    }
+
+    @Test
     void aDryRunPlacesNothingAndRunsNoChildMaven() throws Exception {
         IngestBuildMojo mojo = withFakeMaven("ok");
         mojo.dryRun = true;

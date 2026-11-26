@@ -71,7 +71,10 @@ import java.util.stream.Stream;
  *       of the project and fails on findings. It runs as a child Maven in the
  *       project, and its registry is written under the ingest output
  *       directory, not under the project's {@code target}, so the clean of the
- *       next step cannot remove it. A second run, from
+ *       next step cannot remove it. A topic whose header says its keywords and
+ *       summary are placeholders ({@code :topic-metadata: placeholder}) is a
+ *       warning there, and an error with {@code ike.ingest.requireMetadata=true}.
+ *       A second run, from
  *       {@code index-dex-records.adoc} with {@code rootFile}, must reach every
  *       topic of the record.</li>
  *   <li>{@code render}: {@code mvn clean verify -pl assemblies/MODULE -am} in
@@ -155,6 +158,10 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
     /** The Maven command for the child runs, which may carry arguments; unset, the running Maven's own launcher. */
     @Parameter(property = "ike.build.mavenCommand")
     String mavenCommand;
+
+    /** Make a topic that still has placeholder keywords and summary an error in the registry step; unset, it is only a warning. */
+    @Parameter(property = "ike.ingest.requireMetadata", defaultValue = "false")
+    boolean requireMetadata;
 
     /** Extra arguments for both child Maven runs, for example {@code -o}; split on spaces. */
     @Parameter(property = "ike.build.mavenArgs")
@@ -254,6 +261,9 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         List<String> argv = maven();
         argv.addAll(List.of("-B", plugin + ":topic-registry", "-pl", "topics",
                 "-Dike.topic-registry.output=" + out.resolve("topic-registry.yaml")));
+        if (requireMetadata) {
+            argv.add("-Dike.ingest.requireMetadata=true");
+        }
         argv.addAll(ToolRunner.split(mavenArgs));
         child("topic registry check", argv, project, out.resolve("build-registry.log"));
         Path index = topicsRoot == null ? null : topicsRoot.toPath().resolve(DexRegistration.INDEX_FILE);
@@ -266,6 +276,9 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         rooted.addAll(List.of("-B", plugin + ":topic-registry", "-pl", "topics",
                 "-Dike.topic-registry.rootFile=" + index.toAbsolutePath(),
                 "-Dike.topic-registry.output=" + reached));
+        if (requireMetadata) {
+            rooted.add("-Dike.ingest.requireMetadata=true");
+        }
         rooted.addAll(ToolRunner.split(mavenArgs));
         child("reachability check from " + DexRegistration.INDEX_FILE, rooted, project,
                 out.resolve("build-registry-dex-records.log"));

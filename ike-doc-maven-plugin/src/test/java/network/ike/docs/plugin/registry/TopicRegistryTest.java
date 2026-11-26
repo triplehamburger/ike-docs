@@ -414,6 +414,32 @@ class TopicRegistryTest {
     }
 
     @Test
+    void parse_aPlaceholderMetadataMarkerIsAFindingAndNothingElseIs() {
+        String header = ":topic-id: x\n:topic-type: reference\n:topic-status: review\n:topic-keywords: a\n";
+        TopicHeader marked = TopicHeader.parse("x.adoc", header + ":topic-metadata: Placeholder\n\n[[x]]\n= X\n");
+        assertThat(marked.findings()).singleElement().asString()
+                .contains("placeholders").contains(":topic-metadata: placeholder");
+        TopicHeader written = TopicHeader.parse("x.adoc", header + ":topic-metadata: reviewed\n\n[[x]]\n= X\n");
+        assertThat(written.findings()).isEmpty();
+        assertThat(TopicHeader.parse("x.adoc", header + "\n[[x]]\n= X\n").findings()).isEmpty();
+    }
+
+    @Test
+    void placeholderTopics_listsTheMarkedTopicsOfARegistry(@TempDir Path dir) throws IOException {
+        Path root = Files.createDirectories(dir.resolve("topics/dex"));
+        String marked = ":topic-id: dex-a\n:topic-type: reference\n:topic-status: review\n:topic-keywords: a\n"
+                + ":topic-metadata: placeholder\n\n[[dex-a]]\n= A\n";
+        Files.writeString(root.resolve("a.adoc"), marked);
+        Files.writeString(root.resolve("b.adoc"), marked.replace("dex-a", "dex-b").replace(
+                ":topic-metadata: placeholder\n", ""));
+        Path registry = dir.resolve("registry.yaml");
+        Files.writeString(registry, TopicRegistry.yaml(TopicRegistry.model(
+                List.of(TopicRegistry.scan(dir.resolve("topics"), 100)), dir, Instant.now())));
+
+        assertThat(TopicRegistry.placeholderTopics(TopicRegistry.load(registry))).containsExactly("dex-a");
+    }
+
+    @Test
     void parse_acceptsProcedureAsTaskType() {
         TopicHeader h = TopicHeader.parse("p.adoc",
                 ":topic-id: ops-x\n:topic-type: procedure\n:topic-status: draft\n:topic-keywords: a\n\n[[ops-x]]\n= X\n");

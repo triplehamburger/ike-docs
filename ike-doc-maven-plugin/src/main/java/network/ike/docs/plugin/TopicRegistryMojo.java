@@ -139,6 +139,14 @@ public class TopicRegistryMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.topic-registry.rootFile")
     String rootFile;
 
+    /**
+     * Fail when a topic still has placeholder keywords and summary, that is
+     * a header with {@code :topic-metadata: placeholder}. Without this the
+     * placeholder is a finding in the log and the registry only.
+     */
+    @Parameter(property = "ike.ingest.requireMetadata", defaultValue = "false")
+    boolean requireMetadata;
+
     /** Skip the goal. */
     @Parameter(property = "ike.skip.topic-registry", defaultValue = "false")
     boolean skip;
@@ -267,6 +275,7 @@ public class TopicRegistryMojo implements org.apache.maven.api.plugin.Mojo {
                 + " other file" + (others == 1 ? "" : "s") + ", " + findings
                 + " finding" + (findings == 1 ? "" : "s") + "; topic registry written to "
                 + shown(base, out) + " (" + millis + " ms)");
+        requireMetadataFilled(out);
     }
 
     /**
@@ -354,6 +363,7 @@ public class TopicRegistryMojo implements org.apache.maven.api.plugin.Mojo {
                 + " dropped by " + (index.source() == BlobIndex.Source.GIT ? "git blob" : "hashed blob")
                 + "; topic registry and term index written to " + shown(base, out.getParent())
                 + "/ (" + millis + " ms)");
+        requireMetadataFilled(out);
     }
 
     private TopicRegistry.Scan scanFromRootFile(Path base, List<Path> rootPaths) throws MojoException {
@@ -421,6 +431,32 @@ public class TopicRegistryMojo implements org.apache.maven.api.plugin.Mojo {
         long millis = (System.nanoTime() - started) / 1_000_000;
         getLog().info("added " + added.size() + " file" + (added.size() == 1 ? "" : "s")
                 + " to " + shown(base, out) + " without rescanning (" + millis + " ms)");
+        requireMetadataFilled(out);
+    }
+
+    /**
+     * With {@code requireMetadata}, fail when the written registry still has a
+     * topic whose header marks keywords and summary as placeholders. The
+     * registry file is already written, so it can be inspected.
+     */
+    void requireMetadataFilled(Path registryFile) throws MojoException {
+        if (!requireMetadata) {
+            return;
+        }
+        List<String> placeholders;
+        try {
+            placeholders = TopicRegistry.placeholderTopics(TopicRegistry.load(registryFile));
+        } catch (IOException e) {
+            throw new MojoException("Cannot read the registry " + registryFile + " to check metadata: "
+                    + e.getMessage(), e);
+        }
+        if (!placeholders.isEmpty()) {
+            String shown = String.join(", ", placeholders.stream().limit(5).toList())
+                    + (placeholders.size() > 5 ? " and " + (placeholders.size() - 5) + " more" : "");
+            throw new MojoException(placeholders.size() + " topic(s) still have placeholder keywords and summary "
+                    + "(:topic-metadata: placeholder): " + shown + "; write them and remove the line, or set "
+                    + "-Dike.ingest.requireMetadata=false");
+        }
     }
 
     private static String shown(Path base, Path out) {

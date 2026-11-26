@@ -141,6 +141,10 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.build.dryRun", defaultValue = "false")
     boolean dryRun;
 
+    /** Make a topic that still has placeholder keywords and summary an error in the build stage's registry check; unset, it is only a warning. */
+    @Parameter(property = "ike.ingest.requireMetadata", defaultValue = "false")
+    boolean requireMetadata;
+
     /** Place into a DeX project that has uncommitted changes; they are listed as a warning instead of stopping the build stage. */
     @Parameter(property = "ike.build.allowDirty", defaultValue = "false")
     boolean allowDirty;
@@ -327,6 +331,7 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
                 put(parameters, "project", outputRoot.toString());
                 put(parameters, "assembly", assembly);
                 put(parameters, "plugin", plugin);
+                put(parameters, "requireMetadata", requireMetadata);
                 put(parameters, "mavenCommand", mavenCommand);
                 put(parameters, "mavenArgs", mavenArgs);
             }
@@ -409,6 +414,7 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
         mojo.topicsAttribute = "{generated}/topics-asciidoc";
         mojo.dryRun = dryRun;
         mojo.allowDirty = allowDirty;
+        mojo.requireMetadata = requireMetadata;
         mojo.outputDir = out.toFile();
         mojo.mavenCommand = mavenCommand;
         mojo.mavenArgs = mavenArgs;

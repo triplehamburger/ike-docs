@@ -33,7 +33,10 @@ import java.util.regex.Pattern;
 /// between it and its first part; every other word lives in a fragment.
 ///
 /// The summary, keywords and index terms are placeholders built from the
-/// heading; who writes the real ones is not decided.
+/// heading; who writes the real ones is not decided. Each header says so with
+/// `:topic-metadata: placeholder`, which the registry reports as a finding
+/// (an error when the registry is told metadata is required) until whoever
+/// writes the real text removes the line.
 ///
 /// Nothing here throws for bad input; every problem is a {@link Finding}, and
 /// when any is an error no fragment is returned.
@@ -298,8 +301,9 @@ public final class IngestFragments {
                     + "converter writes these for scans and Word files"));
         }
         findings.add(Finding.warning("metadata-placeholder", name,
-                ":topic-summary:, :topic-keywords: and index terms are placeholders built from the heading; "
-                        + "who writes the real ones is not decided"));
+                ":topic-summary:, :topic-keywords: and index terms are placeholders built from the heading and "
+                        + "each header carries :topic-metadata: placeholder; the registry reports it, and "
+                        + "ike.ingest.requireMetadata=true makes that an error"));
 
         String assemblyName = doc.assemblyName();
         details.put("document-kind", doc.kind());
@@ -738,6 +742,9 @@ public final class IngestFragments {
         return 0;
     }
 
+    /// The value of `:topic-metadata:` that marks a header whose keywords and summary are placeholders.
+    public static final String PLACEHOLDER = "placeholder";
+
     private static String header(Draft d, Doc doc, boolean oversize, List<String> related) {
         String rest = stripLabel(d.title());
         String label = d.title().substring(0, d.title().length() - rest.length()).strip();
@@ -755,6 +762,7 @@ public final class IngestFragments {
                 + ":topic-keywords: " + doc.keywords() + ", " + plain.toLowerCase(Locale.ROOT) + "\n"
                 + ":topic-summary: " + (label.isEmpty() ? "Part" : "Part " + label) + " (" + plain
                 + ") of " + doc.describe() + ", reproduced verbatim.\n"
+                + ":topic-metadata: " + PLACEHOLDER + "\n"
                 + (related.isEmpty() ? "" : ":topic-related: " + String.join(", ", related) + "\n")
                 + ":topic-notes: " + notes + "\n"
                 + ":topic-provenance: external\n"

@@ -42,6 +42,6 @@ Parameters: `ike.fragments.source`, `outputDir`, `sourceUrl`, `sectionLevel` (de
 
 - The study split only recognises ordered-list markup. A converter that writes numbered labels as bold paragraphs gives sections that cannot be split into studies.
 - Scans converted by Docling often give flat, garbled headings and many small fragments.
-- Summary, keywords and index terms are placeholders; who writes the real ones is not decided.
+- Summary, keywords and index terms are placeholders; who writes the real ones is not decided. Each fragment header carries `:topic-metadata: placeholder`. `idoc:topic-registry` reports it as a finding (a warning in the log and the registry), and with `ike.ingest.requireMetadata=true` it fails. Whoever writes the real text removes the line. `idoc:ingest` and `idoc:ingest-build` pass the switch to their registry runs.
 - Images referenced by a local file path (`image:file:///...`) are reported with a warning.
 - The converter's fidelity check is not enforced by this goal. It can fail the tables of real documents, and it cannot judge a scan.

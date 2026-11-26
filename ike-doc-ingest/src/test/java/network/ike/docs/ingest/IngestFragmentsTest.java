@@ -119,6 +119,18 @@ class IngestFragmentsTest {
     }
 
     @Test
+    void everyFragmentHeaderMarksItsKeywordsAndSummaryAsPlaceholders() throws Exception {
+        IngestFragments.Result r = IngestFragments.run(write("k.adoc", RECORD), IngestFragments.Options.defaults());
+
+        assertThat(r.fragments()).isNotEmpty().allSatisfy(f -> assertThat(f.content())
+                .containsOnlyOnce(":topic-metadata: placeholder\n").contains(":topic-summary:")
+                .contains(":topic-keywords:"));
+        assertThat(r.report().findings()).filteredOn(f -> f.check().equals("metadata-placeholder"))
+                .singleElement().satisfies(f -> assertThat(f.message())
+                        .contains(":topic-metadata: placeholder").contains("ike.ingest.requireMetadata"));
+    }
+
+    @Test
     void noWordIsAddedOrLostAndTheReportSaysWhatIsPlaceholder() throws Exception {
         IngestFragments.Result r = IngestFragments.run(write("k.adoc", RECORD), IngestFragments.Options.defaults());
 
