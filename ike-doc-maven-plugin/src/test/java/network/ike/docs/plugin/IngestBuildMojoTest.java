@@ -264,6 +264,56 @@ class IngestBuildMojoTest {
         assertThat(dir.resolve("out/build-render.log")).exists();
     }
 
+    private void markPlaceholder(String file) throws IOException {
+        Path topic = fragments.resolve("topics/dex/" + file);
+        write(topic, Files.readString(topic).replace(":topic-type: reference\n",
+                ":topic-type: reference\n:topic-metadata: placeholder\n"));
+    }
+
+    @Test
+    void withRequireMetadataAPlaceholderFragmentStopsEverythingBeforeAnythingIsWritten() throws Exception {
+        markPlaceholder("k1-two.adoc");
+        IngestBuildMojo mojo = mojo();
+        mojo.requireMetadata = true;
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoException.class)
+                .hasMessageContaining("nothing was placed");
+
+        assertThat(placedYaml()).contains("metadata-placeholder").contains("k1-two.adoc")
+                .doesNotContain("k1-one.adoc: the keywords");
+        assertThat(placed("k1-one.adoc")).doesNotExist();
+        assertThat(project.resolve("assemblies/DeXRecord_K1")).doesNotExist();
+        assertThat(project.resolve("assemblies/pom.xml")).content().doesNotContain("DeXRecord_K1");
+    }
+
+    @Test
+    void aPlaceholderFragmentIsPlacedWhenMetadataIsNotRequired() throws Exception {
+        markPlaceholder("k1-two.adoc");
+
+        mojo().execute();
+
+        assertThat(placed("k1-two.adoc")).content().contains(":topic-metadata: placeholder");
+        assertThat(placedYaml()).doesNotContain("metadata-placeholder");
+    }
+
+    @Test
+    void withRequireMetadataFragmentsWithoutTheMarkerArePlaced() throws Exception {
+        IngestBuildMojo mojo = mojo();
+        mojo.requireMetadata = true;
+
+        mojo.execute();
+
+        assertThat(placed("k1-one.adoc")).exists();
+    }
+
+    @Test
+    void theMarkerIsRecognisedOnlyAsAHeaderLineWithTheRightValue() {
+        assertThat(IngestBuildMojo.hasPlaceholderMarker(":topic-id: x\n:topic-metadata: Placeholder \n")).isTrue();
+        assertThat(IngestBuildMojo.hasPlaceholderMarker(":topic-metadata: reviewed\n")).isFalse();
+        assertThat(IngestBuildMojo.hasPlaceholderMarker("text :topic-metadata: placeholder\n")).isFalse();
+        assertThat(IngestBuildMojo.hasPlaceholderMarker("= T\n\nBody.\n")).isFalse();
+    }
+
     @Test
     void requireMetadataIsPassedToBothRegistryRunsAndOnlyThen() throws Exception {
         IngestBuildMojo off = withFakeMaven("ok");

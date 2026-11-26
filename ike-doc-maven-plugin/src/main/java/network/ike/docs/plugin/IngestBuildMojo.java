@@ -4,6 +4,7 @@ import network.ike.docs.ingest.DexRegistration;
 import network.ike.docs.ingest.Finding;
 import network.ike.docs.ingest.GitState;
 import network.ike.docs.ingest.ImageReferences;
+import network.ike.docs.ingest.IngestFragments;
 import network.ike.docs.ingest.IngestReport;
 import network.ike.docs.ingest.IngestYaml;
 import network.ike.docs.ingest.PathJail;
@@ -61,14 +62,16 @@ import java.util.stream.Stream;
  *       the split recorded an error, when the project has uncommitted changes
  *       (unless {@code ike.build.allowDirty=true}), when an image is missing
  *       or escapes its folder, when a fragment file name is already used by a
- *       topic with a different id, or when a fragment id is used by another
- *       topic file; every check is made before the first file is written. A
+ *       topic with a different id, when a fragment id is used by another
+ *       topic file, or, with {@code ike.ingest.requireMetadata=true}, when a
+ *       fragment header still says its keywords and summary are placeholders;
+ *       every check is made before the first file is written. A
  *       topic with the same file name and id is replaced, which is how a
  *       re-ingest updates it. {@code placed.yaml} lists every file written, to
  *       commit. {@code ike.build.dryRun=true} reports what would be placed,
  *       writes nothing and skips the other steps.</li>
  *   <li>{@code registry}: {@code idoc:topic-registry} reads every topic header
- *       of the project and fails on findings. It runs as a child Maven in the
+ *       of the project and reports findings. It runs as a child Maven in the
  *       project, and its registry is written under the ingest output
  *       directory, not under the project's {@code target}, so the clean of the
  *       next step cannot remove it. A topic whose header says its keywords and
@@ -159,7 +162,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.build.mavenCommand")
     String mavenCommand;
 
-    /** Make a topic that still has placeholder keywords and summary an error in the registry step; unset, it is only a warning. */
+    /** Make a fragment that still has placeholder keywords and summary an error in the place step, before anything is written, and in the registry step; unset, it is only a warning. */
     @Parameter(property = "ike.ingest.requireMetadata", defaultValue = "false")
     boolean requireMetadata;
 
@@ -522,6 +525,12 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         Map<String, String> topicTexts = new TreeMap<>();
         for (Path file : topics) {
             String text = readText(file, findings);
+            if (requireMetadata && hasPlaceholderMarker(text)) {
+                findings.add(Finding.error("metadata-placeholder", file.getFileName().toString(),
+                        "the keywords and summary are placeholders (:topic-metadata: placeholder) and "
+                                + "ike.ingest.requireMetadata=true; write them and remove the line, or turn the "
+                                + "switch off"));
+            }
             topicTexts.put(file.getFileName().toString(), placeImages(text, file.getFileName().toString(),
                     sourceRoot, topicImages, "dex/" + recordId + "/", images, usedImages, findings));
         }
@@ -596,6 +605,13 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
             Thread.currentThread().interrupt();
             findings.add(Finding.error("project-dirty", projectDir.toString(), "interrupted while checking git"));
         }
+    }
+
+    /** Whether a fragment's header marks its keywords and summary as placeholders. */
+    static boolean hasPlaceholderMarker(String text) {
+        String key = ":topic-metadata:";
+        return text.lines().anyMatch(l -> l.startsWith(key)
+                && l.substring(key.length()).strip().equalsIgnoreCase(IngestFragments.PLACEHOLDER));
     }
 
     private static String readText(Path file, List<Finding> findings) {
