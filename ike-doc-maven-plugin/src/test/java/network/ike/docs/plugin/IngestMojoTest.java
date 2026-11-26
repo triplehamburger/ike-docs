@@ -36,6 +36,8 @@ class IngestMojoTest {
                             for (int i = 1; i < a.length - 1; i++) {
                                 if (a[i].equals("-o")) {
                                     Files.writeString(Path.of(a[i + 1]), "= Title\\n\\nBody text.\\n");
+                                    Files.writeString(Path.of(a[i + 1] + ".runs"), "x",
+                                            StandardOpenOption.CREATE, StandardOpenOption.APPEND);
                                 }
                             }
                         }
@@ -110,9 +112,23 @@ class IngestMojoTest {
     private Path pdf;
     private String java;
 
-    private static Log silentLog() {
+
+    private final List<String> logged = new java.util.ArrayList<>();
+
+    /** A log that keeps the info lines, to see which stages were skipped. */
+    private Log recordingLog() {
         return (Log) Proxy.newProxyInstance(Log.class.getClassLoader(), new Class<?>[] {Log.class},
-                (proxy, method, args) -> method.getReturnType() == boolean.class ? Boolean.FALSE : null);
+                (proxy, method, args) -> {
+                    if (method.getName().equals("info") && args != null && args[0] instanceof CharSequence text) {
+                        logged.add(text.toString());
+                    }
+                    return method.getReturnType() == boolean.class ? Boolean.FALSE : null;
+                });
+    }
+
+    private long runs() throws IOException {
+        Path file = dir.resolve("out/K999999.adoc.runs");
+        return Files.isRegularFile(file) ? Files.readString(file).length() : 0;
     }
 
     private static void write(Path file, String text) throws IOException {
@@ -143,7 +159,7 @@ class IngestMojoTest {
     @BeforeEach
     void setUp() throws IOException {
         pdf = dir.resolve("K999999.pdf");
-        Files.write(pdf, new byte[] {1, 2, 3});
+        Files.write(pdf, "%PDF-1.4\n".getBytes(StandardCharsets.ISO_8859_1));
         java = "\"" + Path.of(System.getProperty("java.home"), "bin", "java") + "\"";
     }
 
@@ -155,7 +171,7 @@ class IngestMojoTest {
 
     private IngestMojo mojo() throws IOException {
         IngestMojo mojo = new IngestMojo();
-        mojo.log = silentLog();
+        mojo.log = recordingLog();
         mojo.source = pdf.toFile();
         mojo.outputDir = dir.resolve("out").toFile();
         mojo.convertCommand = tool("convert");
@@ -258,5 +274,161 @@ class IngestMojoTest {
         assertThat(lines.get(0)).startsWith(project + " >").contains(":topic-registry -pl topics").endsWith("-o");
         assertThat(lines.get(1)).contains("rootFile=").contains("index-dex-records.adoc");
         assertThat(lines.get(2)).contains("clean verify -pl assemblies/DeXRecord_K1 -am");
+    }
+
+    private String manifest() throws IOException {
+        return Files.readString(dir.resolve("out/ingest.yaml"));
+    }
+
+    @Test
+    void aSecondRunSkipsAStageWhoseInputsToolAndParametersAreUnchanged() throws Exception {
+        IngestMojo first = mojo();
+        first.stages = "convert";
+        first.execute();
+        String recorded = manifest();
+        byte[] adoc = Files.readAllBytes(dir.resolve("out/K999999.adoc"));
+
+        IngestMojo second = mojo();
+        second.stages = "convert";
+        second.execute();
+
+        assertThat(runs()).isEqualTo(1);
+        assertThat(logged).anyMatch(l -> l.contains("stage convert skipped"));
+        assertThat(manifest()).isEqualTo(recorded);
+        assertThat(Files.readAllBytes(dir.resolve("out/K999999.adoc"))).isEqualTo(adoc);
+        assertThat(recorded).contains("convert:").contains("status: OK").contains("K999999.pdf").contains("kind: PDF")
+                .contains("fidelity").doesNotContain("timestamp");
+    }
+
+    @Test
+    void aChangedParameterRunsTheStageAgainAndRecordsTheNewValue() throws Exception {
+        IngestMojo first = mojo();
+        first.stages = "convert";
+        first.execute();
+
+        IngestMojo second = mojo();
+        second.stages = "convert";
+        second.strictFidelity = true;
+        second.execute();
+
+        assertThat(runs()).isEqualTo(2);
+        assertThat(manifest()).contains("strictFidelity: 'true'");
+    }
+
+    @Test
+    void forceRunsAStageThatCouldBeSkipped() throws Exception {
+        IngestMojo first = mojo();
+        first.stages = "convert";
+        first.execute();
+
+        IngestMojo second = mojo();
+        second.stages = "convert";
+        second.force = true;
+        second.execute();
+
+        assertThat(runs()).isEqualTo(2);
+    }
+
+    @Test
+    void anOutputThatWasDeletedOrChangedRunsTheStageAgain() throws Exception {
+        IngestMojo first = mojo();
+        first.stages = "convert";
+        first.execute();
+        Files.writeString(dir.resolve("out/K999999.adoc"), "tampered");
+
+        IngestMojo second = mojo();
+        second.stages = "convert";
+        second.execute();
+
+        assertThat(runs()).isEqualTo(2);
+        assertThat(dir.resolve("out/K999999.adoc")).content().startsWith("= Title");
+    }
+
+    @Test
+    void aChangedSourceStartsFromAFreshManifest() throws Exception {
+        IngestMojo first = mojo();
+        first.stages = "convert";
+        first.execute();
+        Files.writeString(pdf, "%PDF-1.4\nchanged\n");
+
+        IngestMojo second = mojo();
+        second.stages = "convert";
+        second.execute();
+
+        assertThat(runs()).isEqualTo(2);
+    }
+
+    @Test
+    void aFailedStageIsRecordedAsFailedAndRunsAgainNextTime() throws Exception {
+        IngestMojo failing = mojo();
+        failing.stages = "convert";
+        failing.convertCommand = tool("fail");
+
+        assertThatThrownBy(failing::execute).isInstanceOf(MojoException.class);
+
+        assertThat(manifest()).contains("status: FAILED").contains("stage-failed");
+
+        IngestMojo fixed = mojo();
+        fixed.stages = "convert";
+        fixed.execute();
+
+        assertThat(runs()).isEqualTo(1);
+        assertThat(manifest()).contains("status: OK").doesNotContain("stage-failed");
+    }
+
+    @Test
+    void aRelaxedFidelityGateIsRecordedAsRelaxed() throws Exception {
+        IngestMojo relaxed = mojo();
+        relaxed.stages = "convert";
+        relaxed.execute();
+        assertThat(manifest()).contains("relaxed-gates:\n    - fidelity");
+
+        IngestMojo strict = mojo();
+        strict.stages = "convert";
+        strict.strictFidelity = true;
+        strict.execute();
+        assertThat(manifest()).contains("relaxed-gates: []");
+    }
+
+    @Test
+    void aWordDocumentIsRefusedBecauseOnlyPdfIsSupportedYet() throws Exception {
+        Path docx = dir.resolve("K1.docx");
+        try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(Files.newOutputStream(docx))) {
+            zip.putNextEntry(new java.util.zip.ZipEntry("word/document.xml"));
+            zip.write("<w:document/>".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        IngestMojo mojo = mojo();
+        mojo.source = docx.toFile();
+        mojo.stages = "convert";
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoException.class)
+                .hasMessageContaining("not supported yet");
+
+        assertThat(dir.resolve("out/K1.adoc")).doesNotExist();
+    }
+
+    @Test
+    void theSplitStageIsSkippedOnAnIdenticalSecondRunAndRerunsWhenItsParameterChanges() throws Exception {
+        writePdf(pdf, RECORD.replace("\n\n", "\n"));
+        write(dir.resolve("out/K999999.adoc"), RECORD);
+        IngestMojo first = mojo();
+        first.stages = "split";
+        first.execute();
+        String recorded = manifest();
+
+        IngestMojo again = mojo();
+        again.stages = "split";
+        again.execute();
+        assertThat(logged).anyMatch(l -> l.contains("stage split skipped"));
+        assertThat(manifest()).isEqualTo(recorded);
+
+        logged.clear();
+        IngestMojo changed = mojo();
+        changed.stages = "split";
+        changed.sizeLimit = 4000;
+        changed.execute();
+        assertThat(logged).noneMatch(l -> l.contains("stage split skipped"));
+        assertThat(manifest()).contains("sizeLimit: '4000'");
     }
 }

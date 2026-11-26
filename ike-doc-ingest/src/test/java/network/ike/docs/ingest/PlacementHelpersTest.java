@@ -120,6 +120,34 @@ class PlacementHelpersTest {
         assertThat(none.changed()).isFalse();
     }
 
+    @Test
+    void manifestOpen_continuesFromAMatchingManifestAndStartsFreshOtherwise() throws IOException {
+        Manifest.Source source = new Manifest.Source("a.pdf", "aa", SourceKind.PDF);
+        Path file = dir.resolve("ingest.yaml");
+        assertThat(ManifestRun.open(file, source).stages()).isEmpty();
+
+        Manifest done = Manifest.of(source).withStage("convert", new Manifest.Stage(Manifest.Status.OK,
+                java.util.Map.of(), java.util.Map.of(), null, java.util.Map.of(), List.of(), List.of()));
+        done.write(file);
+        assertThat(ManifestRun.open(file, source).stages()).containsKey("convert");
+        assertThat(ManifestRun.open(file, new Manifest.Source("a.pdf", "bb", SourceKind.PDF)).stages()).isEmpty();
+
+        Files.writeString(file, "not: [valid");
+        assertThat(ManifestRun.open(file, source).stages()).isEmpty();
+    }
+
+    @Test
+    void hashTree_andHashFiles_keyFilesByPathRelativeToTheBase() throws IOException {
+        Files.createDirectories(dir.resolve("out/sub"));
+        Files.writeString(dir.resolve("out/a.txt"), "a");
+        Files.writeString(dir.resolve("out/sub/b.txt"), "b");
+        assertThat(ManifestRun.hashTree(dir, dir.resolve("out"))).containsOnlyKeys("out/a.txt", "out/sub/b.txt")
+                .containsEntry("out/a.txt", IngestHash.sha256Hex("a"));
+        assertThat(ManifestRun.hashTree(dir, dir.resolve("missing"))).isEmpty();
+        assertThat(ManifestRun.hashFiles(dir, List.of(dir.resolve("out/a.txt"), dir.resolve("out/none.txt"))))
+                .containsOnlyKeys("out/a.txt");
+    }
+
     private static boolean gitAvailable() {
         try {
             return new ProcessBuilder("git", "--version").redirectErrorStream(true).start().waitFor() == 0;

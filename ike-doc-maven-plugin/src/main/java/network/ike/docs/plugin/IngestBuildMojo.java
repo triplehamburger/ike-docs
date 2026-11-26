@@ -165,6 +165,9 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.build.timeoutMinutes", defaultValue = "30")
     int timeoutMinutes;
 
+    /** The files the place step wrote into the project, as absolute paths; empty until it has written. */
+    List<Path> placedFiles = List.of();
+
     /** The steps of this goal, in run order. */
     static final List<String> STEPS = List.of("place", "registry", "render");
 
@@ -724,6 +727,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
                     ? projectPath.relativize(Path.of(path)).toString().replace('\\', '/') : path);
         }
         details.put("written", shown);
+        placedFiles = written.stream().map(Path::of).toList();
         if (!plan.replaced().isEmpty()) {
             findings.add(Finding.info("topics-replaced", "topics", plan.replaced().size()
                     + " topic(s) had the same file name and id and were replaced"));

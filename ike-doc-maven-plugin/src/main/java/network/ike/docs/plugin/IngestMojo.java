@@ -1,14 +1,25 @@
 package network.ike.docs.plugin;
 
+import network.ike.docs.ingest.Finding;
+import network.ike.docs.ingest.IngestHash;
+import network.ike.docs.ingest.Manifest;
+import network.ike.docs.ingest.ManifestRun;
+import network.ike.docs.ingest.SourceKind;
+import network.ike.docs.ingest.ToolIdentity;
+import network.ike.docs.ingest.ToolRunner;
+import network.ike.docs.ingest.ToolTrustPolicy;
 import org.apache.maven.api.plugin.MojoException;
 import org.apache.maven.api.plugin.annotations.Mojo;
 import org.apache.maven.api.plugin.annotations.Parameter;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Ingest a source PDF: run the three stages in order from one set of
@@ -30,6 +41,15 @@ import java.util.Locale;
  * {@code K.adoc} and {@code convert.yaml}, the {@code fragments/} folder with
  * {@code fragments.yaml} and {@code coverage.yaml}, and the build step's
  * {@code placed.yaml}, {@code topic-registry.yaml} and Maven logs.
+ *
+ * <p>{@code ingest.yaml} in the output directory records the run: the source
+ * with its hash and, for each stage, how it ended, the hash of every input
+ * and output, the tool that ran and the parameters that matter. A stage is
+ * skipped when it ended well before and its inputs, tool and parameters are
+ * unchanged and its outputs still match, so a second run of the same
+ * document does nothing and leaves every file as it was.
+ * {@code ike.ingest.force=true} runs every stage again. A manifest for
+ * another document, or another version of it, is replaced.
  *
  * <p>Typical use:
  *
@@ -137,9 +157,16 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.build.plugin", defaultValue = "network.ike.docs:ike-doc-maven-plugin")
     String plugin;
 
+    /** Run every stage again even when its inputs, tool and parameters are unchanged. */
+    @Parameter(property = "ike.ingest.force", defaultValue = "false")
+    boolean force;
+
     /** The minutes each external command may run before it is killed. */
     @Parameter(property = "ike.ingest.timeoutMinutes", defaultValue = "30")
     int timeoutMinutes;
+
+    /** The run record, in the output directory. */
+    static final String MANIFEST = "ingest.yaml";
 
     /** The stages, in run order. */
     static final List<String> STAGES = List.of("convert", "split", "build");
@@ -157,20 +184,160 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
             throw new MojoException("idoc:ingest needs ike.ingest.project, the DeX project folder, to run the "
                     + "build stage");
         }
+        Manifest manifest = openManifest(toRun, out);
         for (String stage : toRun) {
-            log.info("idoc:ingest: stage " + stage);
             try {
-                switch (stage) {
-                    case "convert" -> convert(adocFile, out);
-                    case "split" -> split(adocFile, fragments);
-                    case "build" -> build(fragments, out);
-                    default -> throw new MojoException("idoc:ingest: unknown stage " + stage);
-                }
+                manifest = runStage(stage, manifest, out, adocFile, fragments);
             } catch (MojoException e) {
                 throw new MojoException("idoc:ingest stopped at the " + stage + " stage: " + e.getMessage(), e);
             }
         }
         log.info("idoc:ingest: " + String.join(", ", toRun) + " passed; reports under " + out);
+    }
+
+    /** The manifest to continue from; checks that the source is a PDF when the convert stage will run. */
+    private Manifest openManifest(List<String> toRun, Path out) throws MojoException {
+        try {
+            SourceKind.Detection detection = SourceKind.detect(source.toPath());
+            if (toRun.contains("convert") && !detection.usable()) {
+                String why = detection.findings().stream().filter(Finding::isError).map(Finding::message)
+                        .findFirst().orElse("not a supported source");
+                throw new MojoException("idoc:ingest cannot ingest " + source + ": " + why);
+            }
+            SourceKind kind = detection.kind() == null ? SourceKind.PDF : detection.kind();
+            return ManifestRun.open(out.resolve(MANIFEST), new Manifest.Source(source.getName(),
+                    IngestHash.sha256Hex(source.toPath()), kind));
+        } catch (IOException e) {
+            throw new MojoException("idoc:ingest cannot read the source " + source + ": " + e.getMessage(), e);
+        }
+    }
+
+    /** What decides whether a stage can be skipped, and where its recorded outputs are found. */
+    private record StageKey(Map<String, String> inputs, ToolIdentity tool, Map<String, String> parameters,
+                            Path outputRoot, List<Finding> findings, List<String> relaxedGates) {
+    }
+
+    /** Run one stage unless the manifest shows it is up to date; record how it ended. */
+    private Manifest runStage(String stage, Manifest manifest, Path out, Path adocFile, Path fragments)
+            throws MojoException {
+        StageKey key;
+        try {
+            key = keyFor(stage, out, adocFile, fragments);
+            boolean never = force || dryRun && stage.equals("build");
+            if (!never && manifest.canSkip(stage, key.inputs(), key.tool(), key.parameters(), key.outputRoot())) {
+                log.info("idoc:ingest: stage " + stage + " skipped: inputs, tool and parameters are unchanged "
+                        + "and its outputs match " + MANIFEST);
+                return manifest;
+            }
+        } catch (IOException | IllegalArgumentException e) {
+            throw new MojoException("idoc:ingest cannot prepare the " + stage + " stage: " + e.getMessage(), e);
+        }
+        log.info("idoc:ingest: stage " + stage);
+        IngestBuildMojo built = null;
+        try {
+            switch (stage) {
+                case "convert" -> convert(adocFile, out);
+                case "split" -> split(adocFile, fragments);
+                case "build" -> built = build(fragments, out);
+                default -> throw new MojoException("idoc:ingest: unknown stage " + stage);
+            }
+        } catch (MojoException e) {
+            record(manifest, stage, new Manifest.Stage(Manifest.Status.FAILED, key.inputs(), Map.of(), key.tool(),
+                    key.parameters(), withFinding(key.findings(), Finding.error("stage-failed", stage,
+                    String.valueOf(e.getMessage()))), key.relaxedGates()), out);
+            throw e;
+        }
+        if (stage.equals("build") && dryRun) {
+            return manifest;
+        }
+        try {
+            Map<String, String> outputs = new TreeMap<>();
+            switch (stage) {
+                case "convert" -> {
+                    outputs.putAll(ManifestRun.hashFiles(out, List.of(adocFile, out.resolve("convert.yaml"))));
+                    outputs.putAll(ManifestRun.hashTree(out, adocFile.toAbsolutePath().getParent().resolve("images")));
+                }
+                case "split" -> outputs.putAll(ManifestRun.hashTree(out, fragments));
+                default -> outputs.putAll(ManifestRun.hashFiles(project.getAbsoluteFile().toPath(),
+                        built.placedFiles));
+            }
+            return record(manifest, stage, new Manifest.Stage(Manifest.Status.OK, key.inputs(), outputs, key.tool(),
+                    key.parameters(), key.findings(), key.relaxedGates()), out);
+        } catch (IOException e) {
+            throw new MojoException("idoc:ingest cannot record the " + stage + " stage in " + MANIFEST + ": "
+                    + e.getMessage(), e);
+        }
+    }
+
+    private static List<Finding> withFinding(List<Finding> findings, Finding extra) {
+        List<Finding> all = new ArrayList<>(findings);
+        all.add(extra);
+        return all;
+    }
+
+    private Manifest record(Manifest manifest, String stage, Manifest.Stage result, Path out) throws MojoException {
+        Manifest changed = manifest.withStage(stage, result);
+        try {
+            changed.write(out.resolve(MANIFEST));
+        } catch (IOException e) {
+            throw new MojoException("idoc:ingest cannot write " + out.resolve(MANIFEST) + ": " + e.getMessage(), e);
+        }
+        return changed;
+    }
+
+    /** The inputs, tool and parameters of a stage as they are now. */
+    private StageKey keyFor(String stage, Path out, Path adocFile, Path fragments) throws IOException {
+        Map<String, String> inputs = new TreeMap<>();
+        Map<String, String> parameters = new TreeMap<>();
+        ToolIdentity tool = null;
+        List<Finding> findings = new ArrayList<>();
+        List<String> relaxed = List.of();
+        Path outputRoot = out;
+        switch (stage) {
+            case "convert" -> {
+                inputs.put(source.getName(), IngestHash.sha256Hex(source.toPath()));
+                tool = ToolIdentity.resolve(ToolRunner.split(convertCommand), null, null, null);
+                findings.addAll(ToolTrustPolicy.tier0().decide(tool).findings());
+                put(parameters, "fidelity", fidelity);
+                put(parameters, "strictFidelity", strictFidelity);
+                if (fidelity) {
+                    ToolIdentity check = ToolIdentity.resolve(ToolRunner.split(fidelityCommand), null, null, null);
+                    findings.addAll(ToolTrustPolicy.tier0().decide(check).findings());
+                    put(parameters, "fidelityCommand", fidelityCommand);
+                    put(parameters, "fidelityProgramSha256", check.programSha256());
+                    put(parameters, "fidelityScriptSha256", check.scriptSha256());
+                    relaxed = strictFidelity ? List.of() : List.of("fidelity");
+                }
+            }
+            case "split" -> {
+                inputs.put(adocFile.getFileName().toString(), IngestHash.sha256Hex(adocFile));
+                inputs.put(source.getName(), IngestHash.sha256Hex(source.toPath()));
+                put(parameters, "sourceUrl", sourceUrl);
+                put(parameters, "sectionLevel", sectionLevel);
+                put(parameters, "documentId", documentId);
+                put(parameters, "sizeLimit", sizeLimit);
+                put(parameters, "split", split);
+                put(parameters, "maxMissing", maxMissing);
+                put(parameters, "existingRoots", existingRoots != null ? existingRoots : project == null ? null
+                        : project.getAbsoluteFile().toPath().resolve("topics/src/docs/asciidoc").toString());
+            }
+            default -> {
+                inputs.putAll(ManifestRun.hashTree(out, fragments));
+                outputRoot = project.getAbsoluteFile().toPath();
+                put(parameters, "project", outputRoot.toString());
+                put(parameters, "assembly", assembly);
+                put(parameters, "plugin", plugin);
+                put(parameters, "mavenCommand", mavenCommand);
+                put(parameters, "mavenArgs", mavenArgs);
+            }
+        }
+        return new StageKey(inputs, tool, parameters, outputRoot, findings, relaxed);
+    }
+
+    private static void put(Map<String, String> parameters, String name, Object value) {
+        if (value != null) {
+            parameters.put(name, String.valueOf(value));
+        }
     }
 
     /**
@@ -233,7 +400,7 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
         mojo.execute();
     }
 
-    private void build(Path fragments, Path out) throws MojoException {
+    private IngestBuildMojo build(Path fragments, Path out) throws MojoException {
         IngestBuildMojo mojo = new IngestBuildMojo();
         mojo.log = log;
         mojo.fragments = fragments.toFile();
@@ -248,5 +415,6 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
         mojo.plugin = plugin;
         mojo.timeoutMinutes = timeoutMinutes;
         mojo.execute();
+        return mojo;
     }
 }
