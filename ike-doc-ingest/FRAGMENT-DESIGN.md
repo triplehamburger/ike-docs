@@ -16,6 +16,16 @@ The goal does not invoke the converter and does not read the converter's own fid
 
 The fragments follow `IKE-ASCIIDOC-FRAGMENT.md`: a comment header, a `:topic-*:` attribute block, a literal `[[topic-id]]` anchor, a level-1 heading, and the body. Sizes follow `IKE-TOPIC-DECOMPOSITION.md` (5000 characters). `IKE-DEX-INGEST.md` currently describes a 510(k) as one whole-document record; this goal decomposes it instead, so that standard needs updating (decomposition, the id scheme, three heading levels in a fragment, the study fragment convention, converted tables).
 
+### Departures from `IKE-DEX-INGEST.md` (decided 2026-11-23 and 2026-11-24)
+
+The standard treats a 510(k) as one whole-document record and never includes external topics in an assembly. `idoc:ingest-build` departs from it on purpose, and the standard should be updated to match:
+
+- A record is split into fragments and assembled: the split writes an assembly (`DeXRecord_K`) and the build stage places it as its own module.
+- Registration needs no human edit. The build stage generates `topics/dex/_includes-K.adoc`, the topics module's `index-dex-records.adoc` and the `DeXRecords` compendium module, and rewrites them from the fragments on every run. They are committed with the fragments.
+- Ingested topics are listed in `index-dex-records.adoc`, not in the reference index (`index.adoc`), and the ingested records are in the `DeXRecords` compendium, not in `compendium`.
+- A cross-topic `xref:` between an ingested topic and a curated topic would not resolve. None exist today.
+- Images go to `topics/images/dex/K` (from a fragment) or to the assembly module's `images` folder (from the assembly).
+
 ## Behaviour
 
 - **Level.** The heading level to split on is chosen from the headings (the lowest level with two or more) unless `ike.fragments.sectionLevel` is set. A document with a title and no sections is one fragment. When every heading has one level, as Docling writes them, levels are inferred from the printed labels: a Roman numeral keeps the level, a letter goes one deeper, a number two deeper. A lone `I`, `V` or `X` counts as a letter unless a longer Roman numeral is present.
