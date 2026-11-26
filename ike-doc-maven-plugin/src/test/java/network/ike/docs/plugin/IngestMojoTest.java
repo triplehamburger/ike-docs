@@ -57,6 +57,15 @@ class IngestMojoTest {
                         line += " " + a[i];
                     }
                     Files.writeString(Path.of(a[0]), line + "\\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    if (line.contains("rootFile")) {
+                        for (int i = 1; i < a.length; i++) {
+                            if (a[i].startsWith("-Dike.topic-registry.output=")) {
+                                Path out = Path.of(a[i].substring("-Dike.topic-registry.output=".length()));
+                                Files.createDirectories(out.getParent());
+                                Files.writeString(out, "domains:\\n- id: dex\\n  topics:\\n  - id: dex-k1-one\\n");
+                            }
+                        }
+                    }
                 }
             }
             """;
@@ -243,10 +252,11 @@ class IngestMojoTest {
         mojo.execute();
 
         assertThat(project.resolve("topics/src/docs/asciidoc/topics/dex/k1-one.adoc")).exists();
-        assertThat(project.resolve("assemblies/K1/pom.xml")).exists();
+        assertThat(project.resolve("assemblies/DeXRecord_K1/pom.xml")).exists();
         List<String> lines = Files.readAllLines(calls);
-        assertThat(lines).hasSize(2);
+        assertThat(lines).hasSize(3);
         assertThat(lines.get(0)).startsWith(project + " >").contains(":topic-registry -pl topics").endsWith("-o");
-        assertThat(lines.get(1)).contains("clean verify -pl assemblies/K1 -am");
+        assertThat(lines.get(1)).contains("rootFile=").contains("index-dex-records.adoc");
+        assertThat(lines.get(2)).contains("clean verify -pl assemblies/DeXRecord_K1 -am");
     }
 }

@@ -121,6 +121,10 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.build.dryRun", defaultValue = "false")
     boolean dryRun;
 
+    /** Place into a DeX project that has uncommitted changes; they are listed as a warning instead of stopping the build stage. */
+    @Parameter(property = "ike.build.allowDirty", defaultValue = "false")
+    boolean allowDirty;
+
     /** The Maven command for the build stage's child runs; unset, the running Maven's launcher. */
     @Parameter(property = "ike.build.mavenCommand")
     String mavenCommand;
@@ -237,6 +241,7 @@ public class IngestMojo implements org.apache.maven.api.plugin.Mojo {
         mojo.module = assembly;
         mojo.topicsAttribute = "{generated}/topics-asciidoc";
         mojo.dryRun = dryRun;
+        mojo.allowDirty = allowDirty;
         mojo.outputDir = out.toFile();
         mojo.mavenCommand = mavenCommand;
         mojo.mavenArgs = mavenArgs;

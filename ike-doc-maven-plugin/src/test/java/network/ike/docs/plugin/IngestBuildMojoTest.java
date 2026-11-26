@@ -75,6 +75,7 @@ class IngestBuildMojoTest {
         IngestBuildMojo mojo = new IngestBuildMojo();
         mojo.log = silentLog();
         mojo.fragments = fragments.toFile();
+        mojo.topicsRoot = project.resolve("topics/src/docs/asciidoc").toFile();
         mojo.topicsDir = project.resolve("topics/src/docs/asciidoc/topics/dex").toFile();
         mojo.assembliesDir = project.resolve("assemblies").toFile();
         mojo.topicsAttribute = "{generated}/topics-asciidoc";
@@ -97,6 +98,16 @@ class IngestBuildMojoTest {
                     }
                     Files.writeString(Path.of(a[1]), line + "\\n",
                             StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    if (line.contains("rootFile")) {
+                        for (int i = 2; i < a.length; i++) {
+                            if (a[i].startsWith("-Dike.topic-registry.output=")) {
+                                Path out = Path.of(a[i].substring("-Dike.topic-registry.output=".length()));
+                                Files.createDirectories(out.getParent());
+                                Files.writeString(out, a[0].equals("unreached") ? "domains: []\\n"
+                                        : "domains:\\n- id: dex\\n  topics:\\n  - id: dex-k1-one\\n  - id: dex-k1-two\\n");
+                            }
+                        }
+                    }
                     if (a[0].equals("fail") && line.contains("topic-registry")) {
                         System.out.println("[ERROR] duplicate id dex-x");
                         System.exit(1);
@@ -133,7 +144,7 @@ class IngestBuildMojoTest {
 
         assertThat(placed("k1-one.adoc")).exists();
         assertThat(placed("k1-two.adoc")).exists();
-        Path module = project.resolve("assemblies/K1");
+        Path module = project.resolve("assemblies/DeXRecord_K1");
         assertThat(module.resolve("src/docs/asciidoc/DeXRecord_K1.adoc")).content()
                 .startsWith("= K1\n:doctype: book").contains(":topics: {generated}/topics-asciidoc")
                 .contains("include::{topics}/topics/dex/k1-one.adoc");
@@ -142,7 +153,7 @@ class IngestBuildMojoTest {
                 .contains("<artifactId>DeXRecord_K1</artifactId>")
                 .contains("<pdf.source.document>DeXRecord_K1</pdf.source.document>").contains("<classifier>adoc");
         assertThat(project.resolve("assemblies/pom.xml")).content()
-                .contains("<subproject>compendium</subproject>").contains("<subproject>K1</subproject>");
+                .contains("<subproject>compendium</subproject>").contains("<subproject>DeXRecord_K1</subproject>");
         assertThat(dir.resolve("out/placed.yaml")).exists();
     }
 
@@ -154,7 +165,7 @@ class IngestBuildMojoTest {
         mojo.execute();
 
         assertThat(placed("k1-one.adoc")).doesNotExist();
-        assertThat(project.resolve("assemblies/K1")).doesNotExist();
+        assertThat(project.resolve("assemblies/DeXRecord_K1")).doesNotExist();
         assertThat(project.resolve("assemblies/pom.xml")).content().doesNotContain("K1");
         assertThat(dir.resolve("out/placed.yaml")).content().contains("dry-run: true");
     }
@@ -169,7 +180,7 @@ class IngestBuildMojoTest {
         assertThat(placed("k1-one.adoc")).content().contains("More text.");
         assertThat(dir.resolve("out/placed.yaml")).content().contains("topics-replaced");
         assertThat(project.resolve("assemblies/pom.xml")).content()
-                .containsOnlyOnce("<subproject>K1</subproject>");
+                .containsOnlyOnce("<subproject>DeXRecord_K1</subproject>");
     }
 
     @Test
@@ -181,7 +192,7 @@ class IngestBuildMojoTest {
 
         assertThat(placed("k1-one.adoc")).doesNotExist();
         assertThat(placed("k1-two.adoc")).content().contains("dex-someone-else");
-        assertThat(project.resolve("assemblies/K1")).doesNotExist();
+        assertThat(project.resolve("assemblies/DeXRecord_K1")).doesNotExist();
         assertThat(dir.resolve("out/placed.yaml")).content().contains("file-name-clash");
     }
 
@@ -240,13 +251,15 @@ class IngestBuildMojoTest {
 
         assertThat(placed("k1-one.adoc")).exists();
         List<String> lines = Files.readAllLines(calls);
-        assertThat(lines).hasSize(2);
+        assertThat(lines).hasSize(3);
         assertThat(lines.get(0)).startsWith(project + " >")
                 .contains("-B network.ike.docs:ike-doc-maven-plugin:topic-registry -pl topics")
                 .contains("-Dike.topic-registry.output=" + dir.resolve("out").resolve("topic-registry.yaml"))
                 .endsWith("-o -Dfoo=bar");
-        assertThat(lines.get(1)).startsWith(project + " >")
-                .contains("-B clean verify -pl assemblies/K1 -am").endsWith("-o -Dfoo=bar");
+        assertThat(lines.get(1)).contains("-Dike.topic-registry.rootFile=")
+                .contains("index-dex-records.adoc").endsWith("-o -Dfoo=bar");
+        assertThat(lines.get(2)).startsWith(project + " >")
+                .contains("-B clean verify -pl assemblies/DeXRecord_K1 -am").endsWith("-o -Dfoo=bar");
         assertThat(dir.resolve("out/build-registry.log")).exists();
         assertThat(dir.resolve("out/build-render.log")).exists();
     }
@@ -292,9 +305,9 @@ class IngestBuildMojoTest {
                 .hasMessageContaining("ike.build.module");
         assertThat(calls).doesNotExist();
 
-        mojo.module = "K1";
+        mojo.module = "DeXRecord_K1";
         mojo.execute();
-        assertThat(Files.readAllLines(calls)).singleElement().asString().contains("assemblies/K1");
+        assertThat(Files.readAllLines(calls)).singleElement().asString().contains("assemblies/DeXRecord_K1");
     }
 
     @Test
@@ -305,5 +318,229 @@ class IngestBuildMojoTest {
 
         assertThatThrownBy(mojo::execute).isInstanceOf(MojoException.class)
                 .hasMessageContaining("ike.build.mavenCommand");
+    }
+
+    private Path docRoot() {
+        return project.resolve("topics/src/docs/asciidoc");
+    }
+
+    private String placedYaml() throws IOException {
+        return Files.readString(dir.resolve("out/placed.yaml"));
+    }
+
+    @Test
+    void theRecordIsRegisteredByGeneratedFilesAndNoHandOwnedFileIsEditedButTheAggregatorPom() throws Exception {
+        mojo().execute();
+
+        assertThat(docRoot().resolve("topics/dex/_includes-K1.adoc")).hasContent(
+                "// generated by idoc:ingest-build - do not edit\n= K1\n\n"
+                        + "include::k1-one.adoc[leveloffset=+1]\n\ninclude::k1-two.adoc[leveloffset=+1]\n");
+        assertThat(docRoot().resolve("index-dex-records.adoc")).content()
+                .contains("// generated by idoc:ingest-build - do not edit").contains("== DeX Records")
+                .contains("include::topics/dex/_includes-K1.adoc[leveloffset=+2]");
+        Path compendium = project.resolve("assemblies/DeXRecords");
+        assertThat(compendium.resolve("src/docs/asciidoc/DeXRecords.adoc")).content()
+                .contains("include::{topics}/topics/dex/_includes-K1.adoc[leveloffset=+2]")
+                .endsWith("[index]\n== Index\n");
+        assertThat(compendium.resolve("pom.xml")).content().contains("<artifactId>DeXRecords</artifactId>")
+                .contains("<pdf.source.document>DeXRecords</pdf.source.document>");
+        assertThat(project.resolve("assemblies/pom.xml")).content().contains("<subproject>DeXRecords</subproject>");
+        assertThat(placedYaml()).contains("written:").contains("topics/src/docs/asciidoc/index-dex-records.adoc")
+                .contains("assemblies/pom.xml").contains("fragment-not-in-assembly");
+    }
+
+    @Test
+    void aSecondRecordIsAddedToTheGeneratedListsAndTheFirstIsKept() throws Exception {
+        mojo().execute();
+        Path second = dir.resolve("frag2");
+        write(second.resolve("fragments.yaml"), "schema-version: 1\ngoal: ingest-split\nfindings: []\n");
+        write(second.resolve("topics/dex/k2-one.adoc"), topic("dex-k2-one"));
+        write(second.resolve("assembly/DeXRecord_K2.adoc"),
+                "= K2\n\ninclude::{topics}/topics/dex/k2-one.adoc[leveloffset=+1]\n");
+        IngestBuildMojo mojo = mojo();
+        mojo.fragments = second.toFile();
+
+        mojo.execute();
+
+        assertThat(docRoot().resolve("index-dex-records.adoc")).content()
+                .containsSubsequence("_includes-K1.adoc", "_includes-K2.adoc");
+        assertThat(project.resolve("assemblies/DeXRecords/src/docs/asciidoc/DeXRecords.adoc")).content()
+                .containsSubsequence("_includes-K1.adoc", "_includes-K2.adoc");
+        assertThat(project.resolve("assemblies/pom.xml")).content()
+                .containsOnlyOnce("<subproject>DeXRecords</subproject>")
+                .contains("<subproject>DeXRecord_K1</subproject>").contains("<subproject>DeXRecord_K2</subproject>");
+    }
+
+    @Test
+    void theGeneratedFilesAreRewrittenFromTheFragmentsOnEveryRun() throws Exception {
+        mojo().execute();
+        write(docRoot().resolve("index-dex-records.adoc"), "stale\n");
+        write(docRoot().resolve("topics/dex/_includes-K1.adoc"), "stale\n");
+
+        mojo().execute();
+
+        assertThat(docRoot().resolve("index-dex-records.adoc")).content().contains("_includes-K1.adoc");
+        assertThat(docRoot().resolve("topics/dex/_includes-K1.adoc")).content().contains("k1-one.adoc");
+    }
+
+    @Test
+    void aModuleNameThatIsNotTheAssemblyNameIsRefusedBecauseTheFourNamesMustAgree() throws Exception {
+        IngestBuildMojo mojo = mojo();
+        mojo.module = "K1";
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoException.class).hasMessageContaining("nothing was placed");
+
+        assertThat(placedYaml()).contains("module-name-mismatch").contains("DeXRecord_K1");
+        assertThat(project.resolve("assemblies/K1")).doesNotExist();
+        assertThat(placed("k1-one.adoc")).doesNotExist();
+    }
+
+    @Test
+    void imagesAreCopiedAndTheirReferencesRewrittenInThePlacedCopiesOnly() throws Exception {
+        write(fragments.resolve("assembly/DeXRecord_K1.adoc"), "= K1\n\nimage::images/k1-image-01.jpg[\"Picture\",width=255]\n\n"
+                + "include::{topics}/topics/dex/k1-one.adoc[leveloffset=+1]\n");
+        write(fragments.resolve("topics/dex/k1-one.adoc"), topic("dex-k1-one") + "\nimage::images/k1-fig.png[Fig]\n");
+        write(dir.resolve("images/k1-image-01.jpg"), "jpg");
+        write(dir.resolve("images/k1-fig.png"), "png");
+
+        mojo().execute();
+
+        Path module = project.resolve("assemblies/DeXRecord_K1/src/docs/asciidoc");
+        assertThat(module.resolve("images/k1-image-01.jpg")).hasContent("jpg");
+        assertThat(module.resolve("DeXRecord_K1.adoc")).content().contains(":imagesdir: images")
+                .contains("image::k1-image-01.jpg[").doesNotContain("images/k1-image-01");
+        assertThat(docRoot().resolve("images/dex/K1/k1-fig.png")).hasContent("png");
+        assertThat(placed("k1-one.adoc")).content().contains("image::dex/K1/k1-fig.png[Fig]");
+        assertThat(fragments.resolve("topics/dex/k1-one.adoc")).content().contains("image::images/k1-fig.png");
+        assertThat(placedYaml()).contains("images: 2");
+    }
+
+    @Test
+    void anImageThatIsNotThereStopsEverythingBeforeAnythingIsWritten() throws Exception {
+        write(fragments.resolve("topics/dex/k1-one.adoc"), topic("dex-k1-one") + "\nimage::images/gone.png[x]\n");
+
+        assertThatThrownBy(() -> mojo().execute()).isInstanceOf(MojoException.class)
+                .hasMessageContaining("nothing was placed");
+
+        assertThat(placedYaml()).contains("image-missing").contains("gone.png");
+        assertThat(placed("k1-two.adoc")).doesNotExist();
+        assertThat(project.resolve("assemblies/DeXRecord_K1")).doesNotExist();
+    }
+
+    @Test
+    void anImagePathThatLeavesTheSourceFolderIsRefused() throws Exception {
+        write(fragments.resolve("topics/dex/k1-one.adoc"), topic("dex-k1-one") + "\nimage::../secret.png[x]\n");
+
+        assertThatThrownBy(() -> mojo().execute()).isInstanceOf(MojoException.class);
+
+        assertThat(placedYaml()).contains("image-path-escapes");
+        assertThat(placed("k1-one.adoc")).doesNotExist();
+    }
+
+    @Test
+    void aReferenceByUrlOrAttributeIsLeftAlone() throws Exception {
+        String text = topic("dex-k1-one") + "\nimage::https://example.org/a.png[x]\n\nimage::{imagesdir}/b.png[y]\n";
+        write(fragments.resolve("topics/dex/k1-one.adoc"), text);
+
+        mojo().execute();
+
+        assertThat(placed("k1-one.adoc")).hasContent(text);
+    }
+
+    @Test
+    void anImageNoFragmentRefersToIsAWarningNotAnError() throws Exception {
+        write(dir.resolve("images/extra.jpg"), "x");
+
+        mojo().execute();
+
+        assertThat(placedYaml()).contains("image-unreferenced").contains("extra.jpg");
+        assertThat(placed("k1-one.adoc")).exists();
+    }
+
+    @Test
+    void aTopicIdUsedByAnotherFileStopsEverythingBeforeAnythingIsWritten() throws Exception {
+        write(docRoot().resolve("topics/other/x.adoc"), topic("dex-k1-one"));
+
+        assertThatThrownBy(() -> mojo().execute()).isInstanceOf(MojoException.class)
+                .hasMessageContaining("nothing was placed");
+
+        assertThat(placedYaml()).contains("topic-id-clash").contains("topics/other/x.adoc");
+        assertThat(placed("k1-one.adoc")).doesNotExist();
+    }
+
+    private static boolean gitAvailable() {
+        try {
+            return new ProcessBuilder("git", "--version").redirectErrorStream(true).start().waitFor() == 0;
+        } catch (IOException | InterruptedException e) {
+            return false;
+        }
+    }
+
+    private void git(String... args) throws Exception {
+        List<String> command = new java.util.ArrayList<>(List.of("git", "-c", "user.name=t",
+                "-c", "user.email=t@example.org", "-c", "commit.gpgsign=false"));
+        command.addAll(List.of(args));
+        Process process = new ProcessBuilder(command).directory(project.toFile()).redirectErrorStream(true).start();
+        process.getInputStream().readAllBytes();
+        assertThat(process.waitFor()).as(String.join(" ", args)).isZero();
+    }
+
+    @Test
+    void aProjectWithUncommittedChangesIsNotPlacedInto() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(gitAvailable(), "git is needed");
+        git("init", "-q");
+
+        assertThatThrownBy(() -> mojo().execute()).isInstanceOf(MojoException.class)
+                .hasMessageContaining("nothing was placed");
+
+        assertThat(placedYaml()).contains("project-dirty").contains("dirty-before");
+        assertThat(placed("k1-one.adoc")).doesNotExist();
+    }
+
+    @Test
+    void allowDirtyPlacesAndLeavesTheDirtyPathsAsAWarning() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(gitAvailable(), "git is needed");
+        git("init", "-q");
+        IngestBuildMojo mojo = mojo();
+        mojo.allowDirty = true;
+
+        mojo.execute();
+
+        assertThat(placed("k1-one.adoc")).exists();
+        assertThat(placedYaml()).contains("project-dirty").contains("severity: WARNING");
+    }
+
+    @Test
+    void aCleanProjectIsPlacedIntoAndTheFilesAddedAreTheOnesListed() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(gitAvailable(), "git is needed");
+        git("init", "-q");
+        git("add", "-A");
+        git("commit", "-q", "-m", "start");
+
+        mojo().execute();
+
+        assertThat(placed("k1-one.adoc")).exists();
+        assertThat(placedYaml()).doesNotContain("project-dirty");
+    }
+
+    @Test
+    void aRegistryRunThatDoesNotReachEveryTopicOfTheRecordIsAnError() throws Exception {
+        IngestBuildMojo mojo = withFakeMaven("unreached");
+
+        assertThatThrownBy(mojo::execute).isInstanceOf(MojoException.class)
+                .hasMessageContaining("does not reach 2 topic(s)").hasMessageContaining("dex-k1-one");
+        assertThat(Files.readAllLines(calls)).hasSize(2);
+    }
+
+    @Test
+    void theRegistryStepAloneChecksTheTopicsTheIncludesFilesList() throws Exception {
+        mojo().execute();
+        IngestBuildMojo mojo = withFakeMaven("ok");
+        mojo.fragments = null;
+        mojo.steps = "registry";
+
+        mojo.execute();
+
+        assertThat(Files.readAllLines(calls)).hasSize(2);
     }
 }

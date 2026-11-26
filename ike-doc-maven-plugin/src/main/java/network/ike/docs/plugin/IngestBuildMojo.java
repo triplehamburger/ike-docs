@@ -1,8 +1,13 @@
 package network.ike.docs.plugin;
 
+import network.ike.docs.ingest.DexRegistration;
 import network.ike.docs.ingest.Finding;
+import network.ike.docs.ingest.GitState;
+import network.ike.docs.ingest.ImageReferences;
 import network.ike.docs.ingest.IngestReport;
 import network.ike.docs.ingest.IngestYaml;
+import network.ike.docs.ingest.PathJail;
+import network.ike.docs.ingest.PomModules;
 import network.ike.docs.ingest.ToolRunner;
 import org.apache.maven.api.plugin.MojoException;
 import org.apache.maven.api.plugin.annotations.Mojo;
@@ -16,12 +21,17 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -33,19 +43,34 @@ import java.util.stream.Stream;
  *
  * <ol>
  *   <li>{@code place}: the topic files go into the topics module, the assembly
- *       becomes a new assembly module (its {@code pom.xml}, its {@code .adoc})
- *       and is registered as a {@code <subproject>} of
- *       {@code assemblies/pom.xml}. Nothing is placed when the split recorded
- *       an error or when a fragment file name is already used by a topic with
- *       a different id; the check is made for every file before the first is
- *       written. A topic with the same file name and id is replaced, which is
- *       how a re-ingest updates it. {@code ike.build.dryRun=true} reports what
- *       would be placed, writes nothing and skips the other steps.</li>
+ *       becomes a new assembly module and is registered as a
+ *       {@code <subproject>} of {@code assemblies/pom.xml}. The module folder,
+ *       its {@code artifactId}, its {@code .adoc} and
+ *       {@code pdf.source.document} are all the assembly's name
+ *       ({@code DeXRecord_K}). Images the assembly refers to are copied to the
+ *       module's {@code images} folder, images a topic refers to to
+ *       {@code topics/images/dex/K}; the references are rewritten in the
+ *       placed copies only. Three more files are generated and rewritten on
+ *       every run, so nobody edits a hand-owned file to register the record:
+ *       {@code topics/dex/_includes-K.adoc}, the topics module's
+ *       {@code index-dex-records.adoc} and the {@code DeXRecords} compendium
+ *       module (listed as a {@code <subproject>} too). Nothing is placed when
+ *       the split recorded an error, when the project has uncommitted changes
+ *       (unless {@code ike.build.allowDirty=true}), when an image is missing
+ *       or escapes its folder, when a fragment file name is already used by a
+ *       topic with a different id, or when a fragment id is used by another
+ *       topic file; every check is made before the first file is written. A
+ *       topic with the same file name and id is replaced, which is how a
+ *       re-ingest updates it. {@code placed.yaml} lists every file written, to
+ *       commit. {@code ike.build.dryRun=true} reports what would be placed,
+ *       writes nothing and skips the other steps.</li>
  *   <li>{@code registry}: {@code idoc:topic-registry} reads every topic header
  *       of the project and fails on findings. It runs as a child Maven in the
  *       project, and its registry is written under the ingest output
  *       directory, not under the project's {@code target}, so the clean of the
- *       next step cannot remove it.</li>
+ *       next step cannot remove it. A second run, from
+ *       {@code index-dex-records.adoc} with {@code rootFile}, must reach every
+ *       topic of the record.</li>
  *   <li>{@code render}: {@code mvn clean verify -pl assemblies/MODULE -am} in
  *       the project, as a child Maven.</li>
  * </ol>
@@ -72,7 +97,6 @@ import java.util.stream.Stream;
 public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
 
     private static final Pattern MODULE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
-    private static final String ASSEMBLY_PREFIX = "DeXRecord_";
 
     @org.apache.maven.api.di.Inject
     org.apache.maven.api.plugin.Log log;
@@ -85,15 +109,27 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
     @Parameter(property = "ike.build.project", defaultValue = "${project.basedir}")
     File projectDir;
 
-    /** The folder the topic files are copied into; unset, {@code topics/src/docs/asciidoc/topics/dex} in the project. */
+    /** The topics module's AsciiDoc root, which holds {@code index.adoc} and {@code images}; unset, {@code topics/src/docs/asciidoc} in the project. */
+    @Parameter(property = "ike.build.topicsRoot")
+    File topicsRoot;
+
+    /** The folder the topic files are copied into, under the topics root; unset, {@code topics/dex} there. */
     @Parameter(property = "ike.build.topicsDir")
     File topicsDir;
+
+    /** The folder the image references in the fragments are relative to; unset, the parent of the fragments folder, where {@code idoc:ingest-convert} wrote the AsciiDoc and its {@code images}. */
+    @Parameter(property = "ike.build.sourceDir")
+    File sourceDir;
+
+    /** Place into a project that has uncommitted changes; they are listed as a warning instead of stopping the run. */
+    @Parameter(property = "ike.build.allowDirty", defaultValue = "false")
+    boolean allowDirty;
 
     /** The folder holding {@code pom.xml} of the assemblies aggregator and one folder per assembly module; unset, {@code assemblies} in the project. */
     @Parameter(property = "ike.build.assembliesDir")
     File assembliesDir;
 
-    /** The assembly module folder to create or update; unset, it is the assembly file name without {@code DeXRecord_}. */
+    /** The assembly module folder to create or update. It must equal the assembly file name, so the folder, artifactId, {@code .adoc} and {@code pdf.source.document} agree; unset, that name. */
     @Parameter(property = "ike.build.module")
     String module;
 
@@ -135,18 +171,26 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
     /** Creates this goal instance. */
     public IngestBuildMojo() {}
 
+    /** An image file to copy into the project. */
+    private record ImageCopy(Path from, Path to) {
+    }
+
     /** What placing would do, worked out before anything is written. */
-    private record Plan(List<Path> topicFiles, List<String> replaced, Path assemblySource, String assemblyBase,
-                        String moduleName, Path moduleDir, boolean moduleExists, String parentGroup,
-                        String parentArtifact) {
+    private record Plan(Map<String, String> topicTexts, List<String> replaced, String assemblyText,
+                        String assemblyBase, String recordId, List<String> fragmentOrder, String moduleName,
+                        Path moduleDir, boolean moduleExists, String parentGroup, String parentArtifact,
+                        List<ImageCopy> images) {
     }
 
     @Override
     public void execute() throws MojoException {
         List<String> toRun = stepsToRun(steps);
         Path project = projectDir == null ? null : projectDir.getAbsoluteFile().toPath();
-        if (topicsDir == null && project != null) {
-            topicsDir = project.resolve("topics/src/docs/asciidoc/topics/dex").toFile();
+        if (topicsRoot == null && project != null) {
+            topicsRoot = project.resolve("topics/src/docs/asciidoc").toFile();
+        }
+        if (topicsDir == null && topicsRoot != null) {
+            topicsDir = topicsRoot.toPath().resolve("topics/dex").toFile();
         }
         if (assembliesDir == null && project != null) {
             assembliesDir = project.resolve("assemblies").toFile();
@@ -193,7 +237,11 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         return STEPS.stream().filter(named::contains).toList();
     }
 
-    /** The topic registry check: {@code idoc:topic-registry} in the project, as a child Maven. */
+    /**
+     * The topic registry check: {@code idoc:topic-registry} in the project, as a
+     * child Maven, then the same goal from {@code index-dex-records.adoc} with
+     * {@code rootFile}, which must reach every topic of the record.
+     */
     private void registry(Path project) throws MojoException {
         requireProject(project, "registry");
         Path out = outputDir.getAbsoluteFile().toPath();
@@ -202,6 +250,78 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
                 "-Dike.topic-registry.output=" + out.resolve("topic-registry.yaml")));
         argv.addAll(ToolRunner.split(mavenArgs));
         child("topic registry check", argv, project, out.resolve("build-registry.log"));
+        Path index = topicsRoot == null ? null : topicsRoot.toPath().resolve(DexRegistration.INDEX_FILE);
+        if (index == null || !Files.isRegularFile(index)) {
+            log.info("idoc:ingest-build: no " + DexRegistration.INDEX_FILE + ", so the reachability check is skipped");
+            return;
+        }
+        Path reached = out.resolve("topic-registry-dex-records.yaml");
+        List<String> rooted = maven();
+        rooted.addAll(List.of("-B", plugin + ":topic-registry", "-pl", "topics",
+                "-Dike.topic-registry.rootFile=" + index.toAbsolutePath(),
+                "-Dike.topic-registry.output=" + reached));
+        rooted.addAll(ToolRunner.split(mavenArgs));
+        child("reachability check from " + DexRegistration.INDEX_FILE, rooted, project,
+                out.resolve("build-registry-dex-records.log"));
+        List<String> missing = unreachedTopics(reached);
+        if (!missing.isEmpty()) {
+            throw new MojoException("idoc:ingest-build: " + DexRegistration.INDEX_FILE + " does not reach "
+                    + missing.size() + " topic(s): " + String.join(", ", missing)
+                    + "; run the place step again to rewrite it");
+        }
+    }
+
+    /** The ids of the record's topics that the registry run from the index did not list. */
+    private List<String> unreachedTopics(Path registryFile) throws MojoException {
+        Set<String> expected = new LinkedHashSet<>();
+        Path placed = fragments == null ? null : fragments.toPath().resolve("topics").resolve("dex");
+        List<Finding> ignored = new ArrayList<>();
+        for (Path file : placed != null && Files.isDirectory(placed) ? list(placed, ignored)
+                : includedTopicFiles()) {
+            String id = topicId(file);
+            if (id != null) {
+                expected.add(id);
+            }
+        }
+        Set<String> reached = new LinkedHashSet<>();
+        try {
+            Object loaded = new Yaml().load(Files.readString(registryFile, StandardCharsets.UTF_8));
+            if (loaded instanceof Map<?, ?> model && model.get("domains") instanceof List<?> domains) {
+                for (Object d : domains) {
+                    if (d instanceof Map<?, ?> domain && domain.get("topics") instanceof List<?> topics) {
+                        for (Object t : topics) {
+                            if (t instanceof Map<?, ?> topic && topic.get("id") != null) {
+                                reached.add(String.valueOf(topic.get("id")));
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (IOException | RuntimeException e) {
+            throw new MojoException("idoc:ingest-build cannot read " + registryFile + ": " + e.getMessage(), e);
+        }
+        expected.removeAll(reached);
+        return new ArrayList<>(expected);
+    }
+
+    /** The topic files every generated {@code _includes-K.adoc} lists, for a registry check without fragments. */
+    private List<Path> includedTopicFiles() throws MojoException {
+        List<Path> files = new ArrayList<>();
+        try (Stream<Path> s = Files.list(topicsDir.toPath())) {
+            for (Path includes : s.filter(p -> DexRegistration.recordIdOf(p.getFileName().toString()) != null)
+                    .sorted().toList()) {
+                for (String line : Files.readAllLines(includes, StandardCharsets.UTF_8)) {
+                    if (line.startsWith("include::") && line.contains(".adoc[")) {
+                        files.add(topicsDir.toPath().resolve(line.substring("include::".length(),
+                                line.indexOf('['))));
+                    }
+                }
+            }
+        } catch (IOException e) {
+            throw new MojoException("idoc:ingest-build cannot read the includes files in " + topicsDir + ": "
+                    + e.getMessage(), e);
+        }
+        return files;
     }
 
     /** The render: {@code mvn clean verify} for the assembly module and what it needs, as a child Maven. */
@@ -284,7 +404,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         if (plan != null && findings.stream().noneMatch(Finding::isError)) {
             details.put("dry-run", dryRun);
             if (!dryRun) {
-                apply(plan, findings);
+                apply(plan, findings, details);
             }
         }
         IngestReport report = new IngestReport("ingest-build", List.of(), details, findings, List.of());
@@ -308,7 +428,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
                     + out.resolve("placed.yaml"));
         }
         if (plan != null) {
-            log.info("idoc:ingest-build: " + (dryRun ? "would place " : "placed ") + plan.topicFiles().size()
+            log.info("idoc:ingest-build: " + (dryRun ? "would place " : "placed ") + plan.topicTexts().size()
                     + " topic(s) into " + topicsDir + " and assembly module " + plan.moduleName() + " under "
                     + assembliesDir);
         }
@@ -344,11 +464,23 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         }
         Path assembly = assemblies.get(0);
         String base = assembly.getFileName().toString().replaceFirst("\\.adoc$", "");
-        String moduleName = module != null && !module.isBlank() ? module.strip()
-                : base.startsWith(ASSEMBLY_PREFIX) ? base.substring(ASSEMBLY_PREFIX.length()) : base;
+        String moduleName = module != null && !module.isBlank() ? module.strip() : base;
         if (!MODULE_NAME.matcher(moduleName).matches()) {
             findings.add(Finding.error("module-name-invalid", moduleName,
                     "an assembly module name may hold letters, digits, dots, hyphens and underscores only"));
+            return null;
+        }
+        if (!moduleName.equals(base)) {
+            findings.add(Finding.error("module-name-mismatch", moduleName,
+                    "the module folder, its artifactId, its .adoc and pdf.source.document must be the same name, "
+                            + base + ", the name of the assembly file; ike.build.module says " + moduleName));
+            return null;
+        }
+        Path topicsRootPath = topicsRoot.getAbsoluteFile().toPath().normalize();
+        Path topicsPath = topicsDir.getAbsoluteFile().toPath().normalize();
+        if (!topicsPath.startsWith(topicsRootPath) || topicsPath.equals(topicsRootPath)) {
+            findings.add(Finding.error("topics-dir-outside-root", topicsPath.toString(),
+                    "the topics folder must be inside the topics root " + topicsRootPath));
             return null;
         }
         Path assembliesPath = assembliesDir.getAbsoluteFile().toPath();
@@ -356,51 +488,242 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         if (parent == null) {
             return null;
         }
+        checkProjectClean(findings, details);
+        String recordId = DexRegistration.recordId(base);
         Path moduleDir = assembliesPath.resolve(moduleName);
-        List<String> replaced = new ArrayList<>();
-        Path topicsPath = topicsDir.getAbsoluteFile().toPath();
+        Path sourceRoot = sourceDir != null ? sourceDir.getAbsoluteFile().toPath()
+                : frag.toAbsolutePath().getParent();
+        List<ImageCopy> images = new ArrayList<>();
+        Set<Path> usedImages = new LinkedHashSet<>();
+        Path moduleImages = moduleDir.resolve("src").resolve("docs").resolve("asciidoc").resolve("images");
+        String assemblyText = readText(assembly, findings);
+        List<String> order = DexRegistration.fragmentOrder(assemblyText);
+        assemblyText = placeImages(assemblyText, "the assembly", sourceRoot, moduleImages, "", images, usedImages,
+                findings);
+        Map<String, String> topicTexts = new TreeMap<>();
+        Path topicImages = topicsRootPath.resolve("images").resolve("dex").resolve(recordId);
         for (Path file : topics) {
-            Path target = topicsPath.resolve(file.getFileName().toString());
-            if (!Files.exists(target)) {
-                continue;
+            String text = readText(file, findings);
+            topicTexts.put(file.getFileName().toString(), placeImages(text, file.getFileName().toString(),
+                    sourceRoot, topicImages, "dex/" + recordId + "/", images, usedImages, findings));
+        }
+        reportUnreferencedImages(sourceRoot, usedImages, findings);
+        for (String included : order) {
+            if (!topicTexts.containsKey(included)) {
+                findings.add(Finding.warning("assembly-include-missing", included,
+                        "the assembly includes this fragment but topics/dex has no such file"));
             }
+        }
+        for (String name : topicTexts.keySet()) {
+            if (!order.contains(name)) {
+                findings.add(Finding.warning("fragment-not-in-assembly", name,
+                        "this fragment is not included by the assembly; it is listed last in _includes-" + recordId
+                                + ".adoc"));
+            }
+        }
+        List<String> replaced = new ArrayList<>();
+        Map<String, String> existingIds = existingTopicIds(topicsRootPath, topicsPath, topicTexts.keySet());
+        for (Path file : topics) {
+            String name = file.getFileName().toString();
             String newId = topicId(file);
-            String oldId = topicId(target);
-            if (newId != null && newId.equals(oldId)) {
-                replaced.add(file.getFileName().toString());
-            } else {
-                findings.add(Finding.error("file-name-clash", target.toString(),
-                        "a topic with this file name exists with id " + oldId + ", not " + newId
-                                + "; placing would overwrite a different topic"));
+            Path target = topicsPath.resolve(name);
+            if (Files.exists(target)) {
+                String oldId = topicId(target);
+                if (newId != null && newId.equals(oldId)) {
+                    replaced.add(name);
+                } else {
+                    findings.add(Finding.error("file-name-clash", target.toString(),
+                            "a topic with this file name exists with id " + oldId + ", not " + newId
+                                    + "; placing would overwrite a different topic"));
+                }
+            }
+            if (newId != null && existingIds.containsKey(newId)) {
+                findings.add(Finding.error("topic-id-clash", name, "the id " + newId + " is already used by "
+                        + existingIds.get(newId) + "; two topics must not share an id"));
             }
         }
         details.put("topics", topics.size());
         details.put("topics-replaced", replaced.size());
+        details.put("images", images.size());
         details.put("module", moduleName);
+        details.put("record", recordId);
         details.put("topics-dir", topicsPath.toString());
         details.put("assembly-module", moduleDir.toString());
-        return new Plan(topics, replaced, assembly, base, moduleName, moduleDir, Files.isDirectory(moduleDir),
-                parent[0], parent[1]);
+        List<String> fullOrder = new ArrayList<>(order);
+        topicTexts.keySet().stream().filter(n -> !order.contains(n)).forEach(fullOrder::add);
+        fullOrder.removeIf(n -> !topicTexts.containsKey(n));
+        return new Plan(topicTexts, replaced, assemblyText, base, recordId, fullOrder, moduleName, moduleDir,
+                Files.isDirectory(moduleDir), parent[0], parent[1], images);
     }
 
-    private void apply(Plan plan, List<Finding> findings) throws MojoException {
+    /** A DeX project with uncommitted changes makes "files added" meaningless, so it stops the run unless allowed. */
+    private void checkProjectClean(List<Finding> findings, Map<String, Object> details) {
+        if (projectDir == null) {
+            return;
+        }
+        try {
+            var dirty = GitState.dirtyPaths(projectDir.getAbsoluteFile().toPath());
+            if (dirty.isEmpty()) {
+                findings.add(Finding.info("git-unavailable", projectDir.toString(),
+                        "git could not report the project's state, so a dirty start is not checked"));
+            } else if (!dirty.get().isEmpty()) {
+                details.put("dirty-before", dirty.get());
+                String shown = String.join(", ", dirty.get().stream().limit(5).toList())
+                        + (dirty.get().size() > 5 ? " and " + (dirty.get().size() - 5) + " more" : "");
+                String message = dirty.get().size() + " path(s) in the project have uncommitted changes (" + shown
+                        + "), so what this run adds cannot be told apart; commit or stash them"
+                        + (allowDirty ? "" : ", or set ike.build.allowDirty=true");
+                findings.add(allowDirty ? Finding.warning("project-dirty", projectDir.toString(), message)
+                        : Finding.error("project-dirty", projectDir.toString(), message));
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            findings.add(Finding.error("project-dirty", projectDir.toString(), "interrupted while checking git"));
+        }
+    }
+
+    private static String readText(Path file, List<Finding> findings) {
+        try {
+            return Files.readString(file, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            findings.add(Finding.error("fragments-unreadable", file.toString(), "cannot read: " + e.getMessage()));
+            return "";
+        }
+    }
+
+    /**
+     * Rewrite the image references of one text for its new home and queue the
+     * files to copy. A reference becomes the path inside {@code destRoot}
+     * with {@code refPrefix} in front; the placed file therefore finds it from
+     * the images folder its document sets.
+     */
+    private static String placeImages(String text, String owner, Path sourceRoot, Path destRoot, String refPrefix,
+                                      List<ImageCopy> copies, Set<Path> used, List<Finding> findings) {
+        PathJail from = PathJail.enforcing(sourceRoot);
+        PathJail to = PathJail.enforcing(destRoot);
+        for (String target : ImageReferences.targets(text)) {
+            String inside = ImageReferences.insideImages(target);
+            try {
+                Path source = from.resolve(sourceRoot.resolve(target), findings);
+                Path dest = to.resolve(destRoot.resolve(inside), findings);
+                if (!Files.isRegularFile(source)) {
+                    findings.add(Finding.error("image-missing", owner, "refers to the image " + target
+                            + " but " + source + " is not a file"));
+                    continue;
+                }
+                used.add(source);
+                if (copies.stream().noneMatch(c -> c.to().equals(dest))) {
+                    copies.add(new ImageCopy(source, dest));
+                }
+            } catch (AccessDeniedException e) {
+                findings.add(Finding.error("image-path-escapes", owner, "the image path " + target
+                        + " leads outside its folder: " + e.getMessage()));
+            } catch (IOException e) {
+                findings.add(Finding.error("image-unreadable", owner, "cannot resolve the image " + target + ": "
+                        + e.getMessage()));
+            }
+        }
+        return ImageReferences.rewrite(text, target -> refPrefix + ImageReferences.insideImages(target));
+    }
+
+    private static void reportUnreferencedImages(Path sourceRoot, Set<Path> used, List<Finding> findings) {
+        Path images = sourceRoot.resolve("images");
+        if (!Files.isDirectory(images)) {
+            return;
+        }
+        try (Stream<Path> s = Files.walk(images)) {
+            for (Path file : s.filter(Files::isRegularFile).sorted().toList()) {
+                if (!used.contains(realOrSelf(file))) {
+                    findings.add(Finding.warning("image-unreferenced", images.relativize(file).toString(),
+                            "the converter wrote this image but no fragment or the assembly refers to it"));
+                }
+            }
+        } catch (IOException e) {
+            findings.add(Finding.warning("image-unreadable", images.toString(), "cannot list: " + e.getMessage()));
+        }
+    }
+
+    private static Path realOrSelf(Path file) {
+        try {
+            return file.toRealPath();
+        } catch (IOException e) {
+            return file.toAbsolutePath().normalize();
+        }
+    }
+
+    /** The topic ids already in the topics module, with the file each is in; the files this run replaces are left out. */
+    private static Map<String, String> existingTopicIds(Path root, Path topicsPath, Set<String> replacing) {
+        Map<String, String> ids = new LinkedHashMap<>();
+        if (!Files.isDirectory(root)) {
+            return ids;
+        }
+        try (Stream<Path> s = Files.walk(root)) {
+            for (Path file : s.filter(p -> Files.isRegularFile(p) && p.getFileName().toString().endsWith(".adoc"))
+                    .sorted().toList()) {
+                boolean replaced = file.getParent().normalize().equals(topicsPath)
+                        && replacing.contains(file.getFileName().toString());
+                String id = replaced ? null : topicId(file);
+                if (id != null) {
+                    ids.putIfAbsent(id, root.relativize(file).toString().replace('\\', '/'));
+                }
+            }
+        } catch (IOException e) {
+            // an unreadable tree is reported by the registry step; the id check then sees what it can
+        }
+        return ids;
+    }
+
+    private void apply(Plan plan, List<Finding> findings, Map<String, Object> details) throws MojoException {
+        List<String> written = new ArrayList<>();
+        Path projectPath = projectDir == null ? null : projectDir.getAbsoluteFile().toPath();
         try {
             Path topicsPath = topicsDir.getAbsoluteFile().toPath();
-            for (Path file : plan.topicFiles()) {
-                IngestYaml.writeAtomic(topicsPath.resolve(file.getFileName().toString()),
-                        Files.readString(file, StandardCharsets.UTF_8));
+            Path rootPath = topicsRoot.getAbsoluteFile().toPath();
+            for (Map.Entry<String, String> topic : plan.topicTexts().entrySet()) {
+                write(topicsPath.resolve(topic.getKey()), topic.getValue(), written);
+            }
+            for (ImageCopy image : plan.images()) {
+                Files.createDirectories(image.to().getParent());
+                Files.copy(image.from(), image.to(), StandardCopyOption.REPLACE_EXISTING);
+                written.add(image.to().toString());
             }
             Path adocDir = plan.moduleDir().resolve("src").resolve("docs").resolve("asciidoc");
-            IngestYaml.writeAtomic(adocDir.resolve(plan.assemblyBase() + ".adoc"),
-                    withAttributes(Files.readString(plan.assemblySource(), StandardCharsets.UTF_8)));
+            write(adocDir.resolve(plan.assemblyBase() + ".adoc"), withAttributes(plan.assemblyText()), written);
             Path pom = plan.moduleDir().resolve("pom.xml");
             if (!Files.exists(pom)) {
-                IngestYaml.writeAtomic(pom, pomFor(plan));
+                write(pom, pomFor(plan.parentGroup(), plan.parentArtifact(), plan.assemblyBase(), plan.moduleName(),
+                        "Assembly of the topics ingested for " + plan.moduleName() + "."), written);
             }
-            register(plan.moduleName(), assembliesDir.getAbsoluteFile().toPath().resolve("pom.xml"), findings);
+            write(topicsPath.resolve(DexRegistration.includesFileName(plan.recordId())),
+                    DexRegistration.includesFile(plan.recordId(), plan.fragmentOrder()), written);
+            List<String> records = new ArrayList<>();
+            try (Stream<Path> s = Files.list(topicsPath)) {
+                s.map(p -> DexRegistration.recordIdOf(p.getFileName().toString())).filter(java.util.Objects::nonNull)
+                        .sorted().forEach(records::add);
+            }
+            String fromRoot = rootPath.relativize(topicsPath).toString().replace('\\', '/');
+            write(rootPath.resolve(DexRegistration.INDEX_FILE), DexRegistration.indexFile(fromRoot, records), written);
+            Path assembliesPath = assembliesDir.getAbsoluteFile().toPath();
+            Path compendium = assembliesPath.resolve(DexRegistration.COMPENDIUM_MODULE);
+            write(compendium.resolve("src").resolve("docs").resolve("asciidoc")
+                            .resolve(DexRegistration.COMPENDIUM_MODULE + ".adoc"),
+                    DexRegistration.compendiumFile(fromRoot, records), written);
+            if (!Files.exists(compendium.resolve("pom.xml"))) {
+                write(compendium.resolve("pom.xml"), pomFor(plan.parentGroup(), plan.parentArtifact(),
+                        DexRegistration.COMPENDIUM_MODULE, DexRegistration.COMPENDIUM_MODULE,
+                        "Generated: every ingested DeX record."), written);
+            }
+            register(List.of(plan.moduleName(), DexRegistration.COMPENDIUM_MODULE), assembliesPath.resolve("pom.xml"),
+                    findings, written);
         } catch (IOException e) {
             throw new MojoException("idoc:ingest-build could not write the project: " + e.getMessage(), e);
         }
+        List<String> shown = new ArrayList<>();
+        for (String path : written) {
+            shown.add(projectPath != null && Path.of(path).startsWith(projectPath)
+                    ? projectPath.relativize(Path.of(path)).toString().replace('\\', '/') : path);
+        }
+        details.put("written", shown);
         if (!plan.replaced().isEmpty()) {
             findings.add(Finding.info("topics-replaced", "topics", plan.replaced().size()
                     + " topic(s) had the same file name and id and were replaced"));
@@ -409,6 +732,12 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
             findings.add(Finding.info("assembly-module-exists", plan.moduleName(),
                     "the assembly module exists; its assembly .adoc was replaced and its pom.xml kept"));
         }
+    }
+
+    /** Write a file the stage owns, and note it in the list of what was written. */
+    private static void write(Path file, String text, List<String> written) throws IOException {
+        IngestYaml.writeAtomic(file, text);
+        written.add(file.toString());
     }
 
     private boolean fragmentRunHadErrors(Path reportFile, List<Finding> findings) {
@@ -510,7 +839,8 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
     }
 
     /** A {@code pom.xml} for a new assembly module, in the shape of the existing assembly modules. */
-    private static String pomFor(Plan plan) {
+    private static String pomFor(String parentGroup, String parentArtifact, String artifactId, String name,
+                                 String description) {
         String[] lines = {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
             "<project xmlns=\"http://maven.apache.org/POM/4.1.0\"",
@@ -520,18 +850,18 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
             "    <modelVersion>4.1.0</modelVersion>",
             "",
             "    <parent>",
-            "        <groupId>" + plan.parentGroup() + "</groupId>",
-            "        <artifactId>" + plan.parentArtifact() + "</artifactId>",
+            "        <groupId>" + parentGroup + "</groupId>",
+            "        <artifactId>" + parentArtifact + "</artifactId>",
             "    </parent>",
             "",
-            "    <artifactId>" + plan.assemblyBase() + "</artifactId>",
+            "    <artifactId>" + artifactId + "</artifactId>",
             "    <packaging>pom</packaging>",
             "",
-            "    <name>" + plan.moduleName() + "</name>",
-            "    <description>Assembly of the topics ingested for " + plan.moduleName() + ".</description>",
+            "    <name>" + name + "</name>",
+            "    <description>" + description + "</description>",
             "",
             "    <properties>",
-            "        <pdf.source.document>" + plan.assemblyBase() + "</pdf.source.document>",
+            "        <pdf.source.document>" + artifactId + "</pdf.source.document>",
             "    </properties>",
             "",
             "    <dependencies>",
@@ -549,26 +879,29 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         return String.join("\n", lines);
     }
 
-    /** Add the module to the aggregator's {@code <subprojects>} (or {@code <modules>}) when it is not listed. */
-    static void register(String moduleName, Path assembliesPom, List<Finding> findings) throws IOException {
+    /** Add each module to the aggregator's {@code <subprojects>} (or {@code <modules>}) when it is not listed. */
+    static void register(List<String> moduleNames, Path assembliesPom, List<Finding> findings, List<String> written)
+            throws IOException {
         String text = Files.readString(assembliesPom, StandardCharsets.UTF_8);
-        for (String[] tags : new String[][] {{"subprojects", "subproject"}, {"modules", "module"}}) {
-            if (!text.contains("</" + tags[0] + ">")) {
-                continue;
-            }
-            if (text.contains("<" + tags[1] + ">" + moduleName + "</" + tags[1] + ">")) {
+        boolean changed = false;
+        for (String moduleName : moduleNames) {
+            PomModules.Result result = PomModules.add(text, moduleName);
+            if (result.element() == null) {
+                findings.add(Finding.warning("module-not-registered", assembliesPom.toString(),
+                        "no <subprojects> or <modules> element found; add <subproject>" + moduleName
+                                + "</subproject> by hand"));
                 return;
             }
-            String updated = Pattern.compile("(\\s*)</" + tags[0] + ">").matcher(text)
-                    .replaceFirst(m -> java.util.regex.Matcher.quoteReplacement(
-                            m.group(1) + "    <" + tags[1] + ">" + moduleName + "</" + tags[1] + ">"
-                                    + m.group(1) + "</" + tags[0] + ">"));
-            IngestYaml.writeAtomic(assembliesPom, updated);
-            findings.add(Finding.info("module-registered", moduleName,
-                    "added to <" + tags[0] + "> of " + assembliesPom.getFileName()));
-            return;
+            if (result.changed()) {
+                text = result.text();
+                changed = true;
+                findings.add(Finding.info("module-registered", moduleName,
+                        "added to <" + result.element() + "> of " + assembliesPom.getFileName()
+                                + "; commit the change"));
+            }
         }
-        findings.add(Finding.warning("module-not-registered", assembliesPom.toString(),
-                "no <subprojects> or <modules> element found; add <subproject>" + moduleName + "</subproject> by hand"));
+        if (changed) {
+            write(assembliesPom, text, written);
+        }
     }
 }
