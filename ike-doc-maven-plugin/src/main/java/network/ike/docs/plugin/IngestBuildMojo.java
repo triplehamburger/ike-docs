@@ -47,12 +47,15 @@ import java.util.stream.Stream;
  *       {@code <subproject>} of {@code assemblies/pom.xml}. The module folder,
  *       its {@code artifactId}, its {@code .adoc} and
  *       {@code pdf.source.document} are all the assembly's name
- *       ({@code DeXRecord_K}). Images the assembly refers to are copied to the
- *       module's {@code images} folder, images a topic refers to to
- *       {@code topics/images/dex/K}; the references are rewritten in the
- *       placed copies only. Three more files are generated and rewritten on
- *       every run, so nobody edits a hand-owned file to register the record:
- *       {@code topics/dex/_includes-K.adoc}, the topics module's
+ *       ({@code DeXRecord_K}). Images that the assembly or a topic refers to
+ *       are copied to {@code topics/images/dex/K}, and the references are
+ *       rewritten in the placed copies only; the assembly's
+ *       {@code :imagesdir:} is {@code {topics}/images}, as in the compendium,
+ *       so assembly and topic images resolve alike. Three more files are
+ *       generated and rewritten on every run, so nobody edits a hand-owned
+ *       file to register the record: {@code topics/dex/_includes-K.adoc}
+ *       (the assembly's own structure, so text only the assembly holds is
+ *       kept), the topics module's
  *       {@code index-dex-records.adoc} and the {@code DeXRecords} compendium
  *       module (listed as a {@code <subproject>} too). Nothing is placed when
  *       the split recorded an error, when the project has uncommitted changes
@@ -180,7 +183,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
 
     /** What placing would do, worked out before anything is written. */
     private record Plan(Map<String, String> topicTexts, List<String> replaced, String assemblyText,
-                        String assemblyBase, String recordId, List<String> fragmentOrder, String moduleName,
+                        String assemblyBase, String recordId, List<String> orphans, String moduleName,
                         Path moduleDir, boolean moduleExists, String parentGroup, String parentArtifact,
                         List<ImageCopy> images) {
     }
@@ -498,13 +501,12 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
                 : frag.toAbsolutePath().getParent();
         List<ImageCopy> images = new ArrayList<>();
         Set<Path> usedImages = new LinkedHashSet<>();
-        Path moduleImages = moduleDir.resolve("src").resolve("docs").resolve("asciidoc").resolve("images");
         String assemblyText = readText(assembly, findings);
         List<String> order = DexRegistration.fragmentOrder(assemblyText);
-        assemblyText = placeImages(assemblyText, "the assembly", sourceRoot, moduleImages, "", images, usedImages,
-                findings);
-        Map<String, String> topicTexts = new TreeMap<>();
         Path topicImages = topicsRootPath.resolve("images").resolve("dex").resolve(recordId);
+        assemblyText = placeImages(assemblyText, "the assembly", sourceRoot, topicImages, "dex/" + recordId + "/",
+                images, usedImages, findings);
+        Map<String, String> topicTexts = new TreeMap<>();
         for (Path file : topics) {
             String text = readText(file, findings);
             topicTexts.put(file.getFileName().toString(), placeImages(text, file.getFileName().toString(),
@@ -552,10 +554,8 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
         details.put("record", recordId);
         details.put("topics-dir", topicsPath.toString());
         details.put("assembly-module", moduleDir.toString());
-        List<String> fullOrder = new ArrayList<>(order);
-        topicTexts.keySet().stream().filter(n -> !order.contains(n)).forEach(fullOrder::add);
-        fullOrder.removeIf(n -> !topicTexts.containsKey(n));
-        return new Plan(topicTexts, replaced, assemblyText, base, recordId, fullOrder, moduleName, moduleDir,
+        List<String> orphans = topicTexts.keySet().stream().filter(n -> !order.contains(n)).toList();
+        return new Plan(topicTexts, replaced, assemblyText, base, recordId, orphans, moduleName, moduleDir,
                 Files.isDirectory(moduleDir), parent[0], parent[1], images);
     }
 
@@ -698,7 +698,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
                         "Assembly of the topics ingested for " + plan.moduleName() + "."), written);
             }
             write(topicsPath.resolve(DexRegistration.includesFileName(plan.recordId())),
-                    DexRegistration.includesFile(plan.recordId(), plan.fragmentOrder()), written);
+                    DexRegistration.includesFile(plan.recordId(), plan.assemblyText(), plan.orphans()), written);
             List<String> records = new ArrayList<>();
             try (Stream<Path> s = Files.list(topicsPath)) {
                 s.map(p -> DexRegistration.recordIdOf(p.getFileName().toString())).filter(java.util.Objects::nonNull)
@@ -838,7 +838,7 @@ public class IngestBuildMojo implements org.apache.maven.api.plugin.Mojo {
             return assembly;
         }
         String attributes = ":doctype: book\n:toc: left\n:toclevels: 2\n:icons: font\n:topics: " + topicsAttribute
-                + "\n:imagesdir: images\n";
+                + "\n:imagesdir: {topics}/images\n";
         return assembly.substring(0, eol + 1) + attributes + assembly.substring(eol + 1);
     }
 

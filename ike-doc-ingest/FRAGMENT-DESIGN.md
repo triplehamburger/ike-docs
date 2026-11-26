@@ -21,10 +21,10 @@ The fragments follow `IKE-ASCIIDOC-FRAGMENT.md`: a comment header, a `:topic-*:`
 The standard treats a 510(k) as one whole-document record and never includes external topics in an assembly. `idoc:ingest-build` departs from it on purpose, and the standard should be updated to match:
 
 - A record is split into fragments and assembled: the split writes an assembly (`DeXRecord_K`) and the build stage places it as its own module.
-- Registration needs no human edit. The build stage generates `topics/dex/_includes-K.adoc`, the topics module's `index-dex-records.adoc` and the `DeXRecords` compendium module, and rewrites them from the fragments on every run. They are committed with the fragments.
+- Registration needs no human edit. The build stage generates `topics/dex/_includes-K.adoc` (the record's assembly with its includes made relative, so text only the assembly holds is kept), the topics module's `index-dex-records.adoc` and the `DeXRecords` compendium module, and rewrites them on every run. They are committed with the fragments.
 - Ingested topics are listed in `index-dex-records.adoc`, not in the reference index (`index.adoc`), and the ingested records are in the `DeXRecords` compendium, not in `compendium`.
 - A cross-topic `xref:` between an ingested topic and a curated topic would not resolve. None exist today.
-- Images go to `topics/images/dex/K` (from a fragment) or to the assembly module's `images` folder (from the assembly).
+- Images, whether the assembly or a fragment refers to them, go to `topics/images/dex/K`; the assembly's `:imagesdir:` is `{topics}/images`, as in the compendium, so both resolve alike.
 
 ## Behaviour
 

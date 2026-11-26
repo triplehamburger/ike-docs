@@ -10,7 +10,7 @@ import java.util.regex.Pattern;
 /// no person edits a hand-owned file to make a record appear.
 ///
 /// For each record `K` the build stage writes `_includes-K.adoc` beside the
-/// topics, one include per fragment in source order. From the records found
+/// topics: the record's assembly, with its includes made relative. From the records found
 /// there it writes the sibling `index-dex-records.adoc`, which the topics build
 /// renders next to the reference index, and the `DeXRecords` compendium
 /// source. All three are rewritten from the fragments on every run, so they
@@ -80,14 +80,38 @@ public final class DexRegistration {
         return null;
     }
 
-    /// The includes file of one record: its fragments at one level down.
+    /// The includes file of one record: the assembly's own structure, so the
+    /// text only the assembly holds (the preamble, the titles and introductions
+    /// of split sections) is kept, with the includes made relative to the file.
+    ///
+    /// The record id is the title, as decided for the index layout; the
+    /// assembly's own title is kept as a paragraph below it unless it is the
+    /// same text. A fragment the assembly does not include is listed last, so
+    /// it is still reached.
     ///
     /// @param recordId the record id, used as the title
-    /// @param fragments the fragment file names, in source order
+    /// @param assembly the assembly text written by the split stage, with image references
+    ///                 already rewritten for the topics module
+    /// @param orphans  fragment file names the assembly does not include, listed last
     /// @return the file text
-    public static String includesFile(String recordId, List<String> fragments) {
+    public static String includesFile(String recordId, String assembly, List<String> orphans) {
+        List<String> lines = new ArrayList<>(assembly.lines().toList());
+        while (!lines.isEmpty() && lines.get(0).isBlank()) {
+            lines.remove(0);
+        }
+        String title = null;
+        if (!lines.isEmpty() && lines.get(0).startsWith("= ")) {
+            title = lines.remove(0).substring(2).strip();
+        }
         StringBuilder text = new StringBuilder(GENERATED).append("\n= ").append(recordId).append('\n');
-        for (String fragment : fragments) {
+        if (title != null && !title.isEmpty() && !title.equals(recordId)) {
+            text.append('\n').append(title).append('\n');
+        }
+        String body = String.join("\n", lines).replace("include::{topics}/topics/dex/", "include::").strip();
+        if (!body.isEmpty()) {
+            text.append('\n').append(body).append('\n');
+        }
+        for (String fragment : orphans) {
             text.append("\ninclude::").append(fragment).append("[leveloffset=+1]\n");
         }
         return text.toString();
